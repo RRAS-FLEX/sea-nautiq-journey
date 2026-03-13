@@ -3,19 +3,124 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- TODO: Set the document title to the name of your application -->
-    <title>Nautiq — Boat Rentals & Sea Experiences in Greece</title>
-    <meta name="description" content="Discover and book boats instantly for your perfect island adventure in the Greek Mediterranean. Verified boats, trusted owners." />
+
+    <!-- Primary SEO -->
+    <title>Nautiq — Boat Rentals &amp; Sea Experiences in Greece</title>
+    <meta name="description" content="Book verified boats in Greece instantly — Mykonos, Santorini, Thassos, Halkidiki &amp; more. Motor yachts, catamarans, speedboats with trusted local owners. Best prices, no hidden fees." />
+    <meta name="keywords" content="boat rental Greece, rent a boat Greece, yacht charter Greece, Mykonos boat rental, Santorini boat charter, Greek islands sailing, sea experiences Greece, catamaran rent Greece, speedboat hire Greece, boat hire Mediterranean" />
     <meta name="author" content="Nautiq" />
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+    <meta name="theme-color" content="#0ea5e9" />
+    <link rel="canonical" href="https://nautiq.gr/" />
 
-    <meta property="og:title" content="Nautiq — Boat Rentals & Sea Experiences" />
-    <meta property="og:description" content="Find and book boats instantly across Greek islands. Verified boats, trusted owners." />
+    <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+    <meta property="og:url" content="https://nautiq.gr/" />
+    <meta property="og:site_name" content="Nautiq" />
+    <meta property="og:title" content="Nautiq — Boat Rentals &amp; Sea Experiences in Greece" />
+    <meta property="og:description" content="Book verified boats in Greece instantly — Mykonos, Santorini, Thassos &amp; more. Motor yachts, catamarans, speedboats with trusted local owners." />
+    <meta property="og:image" content="https://nautiq.gr/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Nautiq — Rent boats across the Greek islands" />
+    <meta property="og:locale" content="en_US" />
 
+    <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@Lovable" />
-    <meta name="twitter:image" content="https://lovable.dev/opengraph-image-p98pqg.png" />
+    <meta name="twitter:site" content="@NautiqGR" />
+    <meta name="twitter:creator" content="@NautiqGR" />
+    <meta name="twitter:title" content="Nautiq — Boat Rentals &amp; Sea Experiences in Greece" />
+    <meta name="twitter:description" content="Book verified boats in Greece instantly — Mykonos, Santorini, Thassos &amp; more. Best prices, no hidden fees." />
+    <meta name="twitter:image" content="https://nautiq.gr/og-image.png" />
+
+    <!-- Performance hints -->
+    <link rel="dns-prefetch" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <!-- JSON-LD Structured Data: WebSite -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "name": "Nautiq",
+      "url": "https://nautiq.gr",
+      "description": "Book verified boats in Greece instantly across the Greek islands. Motor yachts, catamarans, speedboats with trusted local owners.",
+      "potentialAction": {
+        "@type": "SearchAction",
+        "target": {
+          "@type": "EntryPoint",
+          "urlTemplate": "https://nautiq.gr/boats?location={search_term_string}"
+        },
+        "query-input": "required name=search_term_string"
+      }
+    }
+    </script>
+
+    <!-- JSON-LD Structured Data: LocalBusiness -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "TravelAgency",
+      "name": "Nautiq",
+      "url": "https://nautiq.gr",
+      "logo": "https://nautiq.gr/og-image.png",
+      "description": "Premium boat rental platform connecting travelers with verified boat owners across the Greek islands.",
+      "areaServed": [
+        { "@type": "Place", "name": "Mykonos, Greece" },
+        { "@type": "Place", "name": "Santorini, Greece" },
+        { "@type": "Place", "name": "Thassos, Greece" },
+        { "@type": "Place", "name": "Halkidiki, Greece" }
+      ],
+      "serviceType": ["Boat Rental", "Yacht Charter", "Sea Experiences", "Island Hopping"],
+      "priceRange": "€€",
+      "sameAs": [
+        "https://www.instagram.com/nautiqgr",
+        "https://www.facebook.com/nautiqgr"
+      ]
+    }
+    </script>
+
+    <!-- JSON-LD Structured Data: FAQ -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "How do I rent a boat in Greece with Nautiq?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Simply search by location and date, browse verified boats, and book instantly. No skipper license required for most boats under 6m."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Which Greek islands can I rent a boat on?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Nautiq offers boat rentals in Mykonos, Santorini, Thassos, Halkidiki and more Greek island destinations."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "What types of boats are available to rent?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "You can rent motor yachts, luxury yachts, catamarans, speedboats, sailboats, RIB boats, and traditional wooden boats through Nautiq."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Are Nautiq boat owners verified?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes, all boat owners and listings on Nautiq are verified. We check licenses, safety equipment, and boat conditions before approval."
+          }
+        }
+      ]
+    }
+    </script>
   </head>
 
   <body>

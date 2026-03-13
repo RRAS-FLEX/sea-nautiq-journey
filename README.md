@@ -1,22 +1,12 @@
-# Welcome to your Lovable project
-
-## Project info
-
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+# Nautiq
 
 ## How can I edit this code?
 
 There are several ways of editing your application.
 
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
 **Use your preferred IDE**
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+If you want to work locally using your own IDE, you can clone this repo and push changes.
 
 The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
 
@@ -60,14 +50,112 @@ This project is built with:
 - shadcn-ui
 - Tailwind CSS
 
-## How can I deploy this project?
+## Auth setup (Google + Email)
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+This app now supports:
 
-## Can I connect a custom domain to my Lovable project?
+- Sign in/sign up with email + password
+- Sign in with Google OAuth
 
-Yes, you can!
+Create a local env file before running in dev:
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+```sh
+cp .env.example .env
+```
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+Then set your Google OAuth Web Client ID in `.env`:
+
+```sh
+VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
+VITE_GTM_ID=GTM-XXXXXXX
+VITE_STRIPE_PAYMENT_LINK=https://buy.stripe.com/test_your_payment_link_here
+```
+
+`VITE_STRIPE_PAYMENT_LINK` is used by the booking flow to open Stripe Checkout in a new tab after confirmation.
+
+If you see `401: invalid_client`:
+
+- Make sure this is a **Web application** OAuth client ID.
+- Add your exact frontend origin in Google Console → Authorized JavaScript origins (for example `http://localhost:3000`, `http://localhost:3001`, or `http://192.168.1.71:3000`).
+- Remove quotes/spaces from `.env` value and restart the dev server.
+
+Auth data is persisted in browser local storage:
+
+- `nautiq_auth_users` (registered users)
+- `nautiq_auth_session` (active signed-in user)
+
+## Analytics (GTM + GA4)
+
+This app supports Google Tag Manager via environment variable:
+
+```sh
+VITE_GTM_ID=GTM-XXXXXXX
+```
+
+When set, the app pushes funnel events to `window.dataLayer` and maps them to GA4-friendly events:
+
+- `search_submitted` → `search`
+- `boat_viewed` → `view_item`
+- `booking_started` → `begin_checkout`
+- `booking_confirmed` → `purchase`
+- `experiment_exposure` → `experiment_impression`
+- route changes → `page_view`
+
+For A/B testing, the homepage hero CTA uses experiment key `hero_search_cta` with sticky variants per user.
+
+## Supabase Integration (Optional)
+
+This project includes optional Supabase integration for production-ready database and authentication. 
+
+**Why Supabase?**
+- Real PostgreSQL database instead of localStorage
+- Multi-user support with proper role-based access
+- File storage for boat images and documents
+- Real-time updates with subscriptions
+- Row-Level Security for data privacy
+- Scalable to thousands of users
+
+**Setup Instructions:**
+
+See [SUPABASE_SETUP.md](./SUPABASE_SETUP.md) for detailed setup steps.
+
+**Quick Start:**
+1. Create a Supabase project at [supabase.com](https://supabase.com)
+2. Copy your project URL and anon key
+3. Add them to `.env.local`:
+   ```
+   VITE_SUPABASE_URL=https://xxxx.supabase.co
+   VITE_SUPABASE_ANON_KEY=your-key
+   ```
+4. Run the SQL schema from `SUPABASE_SETUP.md` in the Supabase SQL Editor
+5. Replace imports in your code:
+   ```ts
+   // Before (localStorage):
+   import { addOwnerBoat } from "@/lib/owner-dashboard";
+   
+   // After (Supabase):
+   import { addOwnerBoat } from "@/lib/supabase-owner-dashboard";
+   import { signInWithEmail } from "@/lib/supabase-auth";
+   ```
+
+**Available Supabase Modules:**
+- `src/lib/supabase.ts` — Client initialization & TypeScript types
+- `src/lib/supabase-auth.ts` — Sign up / sign in / session management
+- `src/lib/supabase-owner-dashboard.ts` — Boat CRUD operations
+
+**Backward Compatibility:**
+The current localStorage-based auth and boat management still work. You can migrate incrementally.
+
+## Deployment
+
+Build the app with:
+
+```sh
+npm run build
+```
+
+Preview the production build with:
+
+```sh
+npm run preview
+```

@@ -1,7 +1,8 @@
 import { Compass } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const NautiqLogo = ({ className = "" }: { className?: string }) => (
-  <div className={`flex items-center gap-2 ${className}`}>
+  <Link to="/" className={`flex items-center gap-2 ${className}`}>
     <div className="relative">
       <Compass className="h-8 w-8 text-aegean" strokeWidth={1.5} />
     </div>
@@ -13,7 +14,7 @@ const NautiqLogo = ({ className = "" }: { className?: string }) => (
         Sea Experiences
       </span>
     </div>
-  </div>
+  </Link>
 );
 
 export default NautiqLogo;

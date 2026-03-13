@@ -1,17 +1,28 @@
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import destThassos from "@/assets/dest-thassos.jpg";
-import destHalkidiki from "@/assets/dest-halkidiki.jpg";
-import destMykonos from "@/assets/dest-mykonos.jpg";
-import destSantorini from "@/assets/dest-santorini.jpg";
-
-const destinations = [
-  { name: "Thassos", image: destThassos, boats: 24 },
-  { name: "Halkidiki", image: destHalkidiki, boats: 18 },
-  { name: "Mykonos", image: destMykonos, boats: 32 },
-  { name: "Santorini", image: destSantorini, boats: 28 },
-];
+import { Link } from "react-router-dom";
+import { getDestinations, type Destination } from "@/lib/destinations";
 
 const Destinations = () => {
+  const [destinations, setDestinations] = useState<Destination[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadDestinations = async () => {
+      const nextDestinations = await getDestinations();
+      if (!cancelled) {
+        setDestinations(nextDestinations.filter((destination) => destination.boats > 0).slice(0, 4));
+      }
+    };
+
+    loadDestinations();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <section id="destinations" className="py-20 md:py-28 bg-muted">
       <div className="container mx-auto px-4">
@@ -31,8 +42,8 @@ const Destinations = () => {
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
           {destinations.map((dest, i) => (
+            <Link key={dest.id} to={`/destinations#${dest.slug}`}>
             <motion.div
-              key={dest.name}
               initial={{ opacity: 0, y: 20 }}
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
@@ -53,6 +64,7 @@ const Destinations = () => {
                 <p className="text-sm text-primary-foreground/70">{dest.boats} boats available</p>
               </div>
             </motion.div>
+            </Link>
           ))}
         </div>
       </div>

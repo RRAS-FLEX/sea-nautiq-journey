@@ -1,7 +1,9 @@
 import { Star, Users, MapPin } from "lucide-react";
 import { motion } from "framer-motion";
+import { Link } from "react-router-dom";
 
 interface BoatCardProps {
+  id?: string;
   image: string;
   name: string;
   capacity: number;
@@ -9,10 +11,11 @@ interface BoatCardProps {
   pricePerDay: number;
   rating: number;
   index: number;
+  reviewCount?: number;
 }
 
-const BoatCard = ({ image, name, capacity, location, pricePerDay, rating, index }: BoatCardProps) => {
-  return (
+const BoatCard = ({ id, image, name, capacity, location, pricePerDay, rating, index, reviewCount }: BoatCardProps) => {
+  const cardContent = (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       whileInView={{ opacity: 1, y: 0 }}
@@ -43,18 +46,37 @@ const BoatCard = ({ image, name, capacity, location, pricePerDay, rating, index 
             <Users className="h-3.5 w-3.5" />
             {capacity} guests
           </span>
+          {typeof reviewCount === "number" ? (
+            <span className="text-xs">{reviewCount} reviews</span>
+          ) : null}
         </div>
         <div className="flex items-center justify-between">
           <div>
             <span className="text-lg font-heading font-bold text-foreground">€{pricePerDay}</span>
             <span className="text-sm text-muted-foreground"> / day</span>
           </div>
-          <button className="text-sm font-medium text-aegean hover:text-turquoise transition-colors">
-            View Boat →
-          </button>
+          {id ? (
+            <Link to={`/boats/${id}`} className="text-sm font-medium text-aegean hover:text-turquoise transition-colors">
+              View Boat →
+            </Link>
+          ) : (
+            <button className="text-sm font-medium text-aegean hover:text-turquoise transition-colors">
+              View Boat →
+            </button>
+          )}
         </div>
       </div>
     </motion.div>
+  );
+
+  if (!id) {
+    return cardContent;
+  }
+
+  return (
+    <Link to={`/boats/${id}`} aria-label={`View ${name} boat details`} className="block">
+      {cardContent}
+    </Link>
   );
 };
 
