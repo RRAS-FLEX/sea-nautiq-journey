@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import { resolveStorageImage } from "./storage-public";
+import { parseStorageReference, resolveStorageImage } from "./storage-public";
 
 export interface BoatDocument {
   id?: string;
@@ -7,6 +7,7 @@ export interface BoatDocument {
   dataUrl?: string;
   filePath: string;
   fileType: string;
+  file?: File | null;
 }
 
 export interface OwnerBoat {
@@ -14,16 +15,38 @@ export interface OwnerBoat {
   name: string;
   type: string;
   location: string;
+  description: string;
+  lengthMeters: number;
+  year: number;
+  cruisingSpeedKnots: number;
+  fuelBurnLitresPerHour: number;
+  departureMarina: string;
+  cancellationPolicy: string;
+  responseTime: string;
+  mapQuery: string;
+  unavailableDates: string[];
+  minNoticeHours: number;
   capacity: number;
   pricePerDay: number;
   rating: number;
   image: string;
   features: string[];
+  skipperRequired: boolean;
   status: "active" | "inactive" | "maintenance";
   bookings: number;
   revenue: number;
+  documentsFolder: string;
   documents: BoatDocument[];
 }
+
+type OwnerBoatMutation = Omit<OwnerBoat, "id" | "documentsFolder"> & {
+  documentsFolder?: string;
+  imageFile?: File | null;
+};
+
+type OwnerBoatUpdateMutation = Partial<OwnerBoat> & {
+  imageFile?: File | null;
+};
 
 export interface OwnerPackage {
   id: string;
@@ -62,28 +85,131 @@ const getSession = async () => {
   return session;
 };
 
-const mapBoatDocument = (document: any): BoatDocument => ({
+const toSafeFileName = (value: string) => value.replace(/[^a-zA-Z0-9._-]+/g, "-");
+
+const getBoatDocumentsFolder = (ownerId: string, boatId: string) => `boat-documents/${ownerId}/${boatId}`;
+
+const resolveDocumentUrl = async (filePath: string) => {
+  if (!filePath) {
+    return "";
+  }
+
+  if (/^https?:\/\//i.test(filePath) || /^data:/i.test(filePath)) {
+    return filePath;
+  }
+
+  const storageRef = parseStorageReference(filePath, "boat-documents");
+  if (!storageRef) {
+    return filePath;
+  }
+
+  const { data, error } = await supabase.storage
+    .from(storageRef.bucket)
+    .createSignedUrl(storageRef.path, 60 * 60);
+
+  if (error || !data?.signedUrl) {
+    return filePath;
+  }
+
+  return data.signedUrl;
+};
+
+const mapBoatDocument = async (document: any): Promise<BoatDocument> => ({
   id: document.id,
   name: document.name,
   filePath: document.file_path,
-  dataUrl: document.file_path,
+  dataUrl: await resolveDocumentUrl(document.file_path),
   fileType: document.file_type ?? "application/octet-stream",
 });
+
+const normalizeBoatImagePath = (value: string | null | undefined) => {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return "";
+  if (/\.\w{2,6}(\?|$)/.test(trimmed)) return trimmed;
+  return `${trimmed.replace(/\/+$/, "")}/1.jpg`;
+};
+
+const resolveOwnerBoatImage = (boat: any) => {
+  const candidate = normalizeBoatImagePath(boat.images ?? boat.image);
+  return resolveStorageImage(candidate, "boat-images", "https://via.placeholder.com/400x300?text=Boat");
+};
+
+const uploadPrimaryBoatImage = async (ownerId: string, boatId: string, file: File) => {
+  const extension = (file.name.split(".").pop() ?? "jpg").toLowerCase();
+  const normalizedExt = extension.replace(/[^a-z0-9]/g, "") || "jpg";
+  const objectPath = `${ownerId}/${boatId}/1.${normalizedExt}`;
+
+  const { error } = await supabase.storage
+    .from("boat-images")
+    .upload(objectPath, file, {
+      upsert: true,
+      contentType: file.type || "image/jpeg",
+    });
+
+  if (error) {
+    throw new Error(error.message || "Failed to upload boat image");
+  }
+
+  return `boat-images/${ownerId}/${boatId}`;
+};
+
+const uploadBoatDocument = async (ownerId: string, boatId: string, document: BoatDocument) => {
+  if (!(document.file instanceof File)) {
+    return {
+      name: document.name,
+      file_path: document.filePath || document.dataUrl || "",
+      file_type: document.fileType,
+    };
+  }
+
+  const safeName = toSafeFileName(document.file.name || document.name || "document");
+  const objectPath = `${ownerId}/${boatId}/${safeName}`;
+
+  const { error } = await supabase.storage
+    .from("boat-documents")
+    .upload(objectPath, document.file, {
+      upsert: true,
+      contentType: document.file.type || document.fileType || "application/octet-stream",
+    });
+
+  if (error) {
+    throw new Error(error.message || `Failed to upload document ${document.name}`);
+  }
+
+  return {
+    name: document.name,
+    file_path: `boat-documents/${objectPath}`,
+    file_type: document.file.type || document.fileType || "application/octet-stream",
+  };
+};
 
 const mapOwnerBoat = (boat: any, features: string[], documents: BoatDocument[]): OwnerBoat => ({
   id: boat.id,
   name: boat.name,
   type: boat.type,
   location: boat.location,
+  description: boat.description ?? "",
+  lengthMeters: Number(boat.length_meters ?? 0),
+  year: Number(boat.year ?? 0),
+  cruisingSpeedKnots: Number(boat.cruising_speed_knots ?? 0),
+  fuelBurnLitresPerHour: Number(boat.fuel_burn_litres_per_hour ?? 0),
+  departureMarina: boat.departure_marina ?? boat.location ?? "",
+  cancellationPolicy: boat.cancellation_policy ?? "",
+  responseTime: boat.response_time ?? "",
+  mapQuery: boat.map_query ?? "",
+  unavailableDates: Array.isArray(boat.unavailable_dates) ? boat.unavailable_dates : [],
+  minNoticeHours: Number(boat.min_notice_hours ?? 24),
   capacity: Number(boat.capacity ?? 0),
   pricePerDay: Number(boat.price_per_day ?? 0),
   rating: Number(boat.rating ?? 0),
-  image: resolveStorageImage(boat.image, "boat-images", "https://via.placeholder.com/400x300?text=Boat"),
+  image: resolveOwnerBoatImage(boat),
   features,
+  skipperRequired: Boolean(boat.skipper_required),
   documents,
   status: boat.status ?? "active",
   bookings: Number(boat.bookings ?? 0),
   revenue: Number(boat.revenue ?? 0),
+  documentsFolder: boat.documents_folder ?? "",
 });
 
 export const getOwnerBoats = async (): Promise<OwnerBoat[]> => {
@@ -109,16 +235,20 @@ export const getOwnerBoats = async (): Promise<OwnerBoat[]> => {
         documentsTable.select("id, name, file_path, file_type").eq("boat_id", boat.id),
       ]);
 
+      const resolvedDocuments = Array.isArray(documentRows)
+        ? await Promise.all(documentRows.map(mapBoatDocument))
+        : [];
+
       return mapOwnerBoat(
         boat,
         Array.isArray(featureRows) ? featureRows.map((feature: any) => feature.feature) : [],
-        Array.isArray(documentRows) ? documentRows.map(mapBoatDocument) : [],
+        resolvedDocuments,
       );
     }),
   );
 };
 
-export const addOwnerBoat = async (boat: Omit<OwnerBoat, "id">): Promise<OwnerBoat> => {
+export const addOwnerBoat = async (boat: OwnerBoatMutation): Promise<OwnerBoat> => {
   const session = await getSession();
   const boatsTable = (supabase as any).from("boats");
   const featuresTable = (supabase as any).from("boat_features");
@@ -128,12 +258,25 @@ export const addOwnerBoat = async (boat: Omit<OwnerBoat, "id">): Promise<OwnerBo
     .insert({
       owner_id: session.user.id,
       name: boat.name,
+      description: boat.description,
       type: boat.type,
       location: boat.location,
+      length_meters: boat.lengthMeters,
+      year: boat.year,
+      cruising_speed_knots: boat.cruisingSpeedKnots,
+      fuel_burn_litres_per_hour: boat.fuelBurnLitresPerHour,
+      departure_marina: boat.departureMarina,
+      cancellation_policy: boat.cancellationPolicy,
+      response_time: boat.responseTime,
+      map_query: boat.mapQuery,
+      unavailable_dates: boat.unavailableDates,
+      min_notice_hours: boat.minNoticeHours,
       capacity: boat.capacity,
       price_per_day: boat.pricePerDay,
       rating: boat.rating,
-      image: boat.image,
+      images: boat.image,
+      skipper_required: boat.skipperRequired,
+      documents_folder: getBoatDocumentsFolder(session.user.id, "pending"),
       status: boat.status,
       bookings: boat.bookings,
       revenue: boat.revenue,
@@ -145,6 +288,22 @@ export const addOwnerBoat = async (boat: Omit<OwnerBoat, "id">): Promise<OwnerBo
     throw new Error(error?.message || "Failed to add boat");
   }
 
+  let primaryImagePath = boat.image;
+  if (boat.imageFile instanceof File) {
+    primaryImagePath = await uploadPrimaryBoatImage(session.user.id, insertedBoat.id, boat.imageFile);
+  }
+
+  const documentsFolder = getBoatDocumentsFolder(session.user.id, insertedBoat.id);
+
+  await boatsTable
+    .update({
+      images: primaryImagePath,
+      documents_folder: documentsFolder,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", insertedBoat.id)
+    .eq("owner_id", session.user.id);
+
   if (boat.features.length > 0) {
     await featuresTable.insert(
       boat.features.map((feature) => ({
@@ -155,12 +314,16 @@ export const addOwnerBoat = async (boat: Omit<OwnerBoat, "id">): Promise<OwnerBo
   }
 
   if (boat.documents.length > 0) {
+    const uploadedDocuments = await Promise.all(
+      boat.documents.map((document) => uploadBoatDocument(session.user.id, insertedBoat.id, document)),
+    );
+
     await documentsTable.insert(
-      boat.documents.map((document) => ({
+      uploadedDocuments.map((document) => ({
         boat_id: insertedBoat.id,
         name: document.name,
-        file_path: document.filePath || document.dataUrl || "",
-        file_type: document.fileType,
+        file_path: document.file_path,
+        file_type: document.file_type,
       })),
     );
   }
@@ -168,6 +331,9 @@ export const addOwnerBoat = async (boat: Omit<OwnerBoat, "id">): Promise<OwnerBo
   return {
     ...boat,
     id: insertedBoat.id,
+    skipperRequired: boat.skipperRequired,
+    documentsFolder,
+    image: resolveStorageImage(normalizeBoatImagePath(primaryImagePath), "boat-images", "https://via.placeholder.com/400x300?text=Boat"),
     documents: boat.documents.map((document) => ({
       ...document,
       filePath: document.filePath || document.dataUrl || "",
@@ -176,7 +342,7 @@ export const addOwnerBoat = async (boat: Omit<OwnerBoat, "id">): Promise<OwnerBo
   };
 };
 
-export const updateOwnerBoat = async (boatId: string, updates: Partial<OwnerBoat>): Promise<OwnerBoat | null> => {
+export const updateOwnerBoat = async (boatId: string, updates: OwnerBoatUpdateMutation): Promise<OwnerBoat | null> => {
   const session = await getSession();
   const boatsTable = (supabase as any).from("boats");
   const featuresTable = (supabase as any).from("boat_features");
@@ -189,10 +355,22 @@ export const updateOwnerBoat = async (boatId: string, updates: Partial<OwnerBoat
   if (updates.name !== undefined) boatUpdates.name = updates.name;
   if (updates.type !== undefined) boatUpdates.type = updates.type;
   if (updates.location !== undefined) boatUpdates.location = updates.location;
+  if (updates.description !== undefined) boatUpdates.description = updates.description;
+  if (updates.lengthMeters !== undefined) boatUpdates.length_meters = updates.lengthMeters;
+  if (updates.year !== undefined) boatUpdates.year = updates.year;
+  if (updates.cruisingSpeedKnots !== undefined) boatUpdates.cruising_speed_knots = updates.cruisingSpeedKnots;
+  if (updates.fuelBurnLitresPerHour !== undefined) boatUpdates.fuel_burn_litres_per_hour = updates.fuelBurnLitresPerHour;
+  if (updates.departureMarina !== undefined) boatUpdates.departure_marina = updates.departureMarina;
+  if (updates.cancellationPolicy !== undefined) boatUpdates.cancellation_policy = updates.cancellationPolicy;
+  if (updates.responseTime !== undefined) boatUpdates.response_time = updates.responseTime;
+  if (updates.mapQuery !== undefined) boatUpdates.map_query = updates.mapQuery;
+  if (updates.unavailableDates !== undefined) boatUpdates.unavailable_dates = updates.unavailableDates;
+  if (updates.minNoticeHours !== undefined) boatUpdates.min_notice_hours = updates.minNoticeHours;
   if (updates.capacity !== undefined) boatUpdates.capacity = updates.capacity;
   if (updates.pricePerDay !== undefined) boatUpdates.price_per_day = updates.pricePerDay;
   if (updates.rating !== undefined) boatUpdates.rating = updates.rating;
-  if (updates.image !== undefined) boatUpdates.image = updates.image;
+  if (updates.image !== undefined) boatUpdates.images = updates.image;
+  if (updates.skipperRequired !== undefined) boatUpdates.skipper_required = updates.skipperRequired;
   if (updates.status !== undefined) boatUpdates.status = updates.status;
   if (updates.bookings !== undefined) boatUpdates.bookings = updates.bookings;
   if (updates.revenue !== undefined) boatUpdates.revenue = updates.revenue;
@@ -201,6 +379,18 @@ export const updateOwnerBoat = async (boatId: string, updates: Partial<OwnerBoat
 
   if (error) {
     throw new Error(error.message || "Failed to update boat");
+  }
+
+  if (updates.imageFile instanceof File) {
+    const uploadedPath = await uploadPrimaryBoatImage(session.user.id, boatId, updates.imageFile);
+    const { error: imageUpdateError } = await boatsTable
+      .update({ images: uploadedPath, updated_at: new Date().toISOString() })
+      .eq("id", boatId)
+      .eq("owner_id", session.user.id);
+
+    if (imageUpdateError) {
+      throw new Error(imageUpdateError.message || "Failed to save uploaded boat image");
+    }
   }
 
   if (updates.features) {
@@ -218,14 +408,23 @@ export const updateOwnerBoat = async (boatId: string, updates: Partial<OwnerBoat
   if (updates.documents) {
     await documentsTable.delete().eq("boat_id", boatId);
     if (updates.documents.length > 0) {
+      const uploadedDocuments = await Promise.all(
+        updates.documents.map((document) => uploadBoatDocument(session.user.id, boatId, document)),
+      );
+
       await documentsTable.insert(
-        updates.documents.map((document) => ({
+        uploadedDocuments.map((document) => ({
           boat_id: boatId,
           name: document.name,
-          file_path: document.filePath || document.dataUrl || "",
-          file_type: document.fileType,
+          file_path: document.file_path,
+          file_type: document.file_type,
         })),
       );
+
+      await boatsTable
+        .update({ documents_folder: getBoatDocumentsFolder(session.user.id, boatId), updated_at: new Date().toISOString() })
+        .eq("id", boatId)
+        .eq("owner_id", session.user.id);
     }
   }
 

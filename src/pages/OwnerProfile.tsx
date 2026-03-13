@@ -20,8 +20,10 @@ import AddBoatModal from "../components/owner/AddBoatModal";
 import PackageManagement from "../components/owner/PackageManagement";
 import { getOwnerBoats, getOwnerStats, OwnerBoat } from "../lib/dashboard-hybrid";
 import { useCurrentUser } from "../hooks/useCurrentUser";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const OwnerProfile = () => {
+  const { tl } = useLanguage();
   const { user } = useCurrentUser();
   const [showAddBoat, setShowAddBoat] = useState(false);
   const [editingBoat, setEditingBoat] = useState<OwnerBoat | null>(null);
@@ -86,7 +88,7 @@ const OwnerProfile = () => {
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <h1 className="text-2xl md:text-3xl font-heading font-bold text-foreground">{user?.name ?? "Owner"}</h1>
-                        <Badge className="bg-gradient-accent text-accent-foreground">Verified Owner</Badge>
+                        <Badge className="bg-gradient-accent text-accent-foreground">{tl("Verified Owner", "Επαληθευμένος Ιδιοκτήτης")}</Badge>
                       </div>
                       <p className="text-muted-foreground max-w-2xl">
                         {user?.email ?? "Manage your boats and bookings from the owner dashboard."}
@@ -102,16 +104,19 @@ const OwnerProfile = () => {
 
               <Card className="shadow-card">
                 <CardHeader>
-                  <CardTitle className="text-lg">Profile Actions</CardTitle>
+                  <CardTitle className="text-lg">{tl("Profile Actions", "Ενέργειες Προφίλ")}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <Button className="w-full bg-gradient-accent text-accent-foreground">Edit Profile</Button>
+                  <Button className="w-full bg-gradient-accent text-accent-foreground">{tl("Edit Profile", "Επεξεργασία Προφίλ")}</Button>
+                  <Button asChild variant="outline" className="w-full">
+                    <Link to="/owner-dashboard">{tl("Open Owner Dashboard", "Άνοιγμα Πίνακα Ιδιοκτήτη")}</Link>
+                  </Button>
                   <Button variant="outline" className="w-full gap-2" onClick={() => setShowAddBoat(true)}>
                     <Plus className="h-4 w-4" />
-                    Add Another Boat
+                    {tl("Add Another Boat", "Προσθήκη Νέου Σκάφους")}
                   </Button>
                   <Button asChild variant="outline" className="w-full">
-                    <Link to="/business-promotions">Business promotion tickets</Link>
+                    <Link to="/business-promotions">{tl("Business promotion tickets", "Αιτήματα προώθησης επιχειρήσεων")}</Link>
                   </Button>
                 </CardContent>
               </Card>

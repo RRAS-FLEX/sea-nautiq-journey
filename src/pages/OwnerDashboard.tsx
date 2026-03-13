@@ -12,8 +12,10 @@ import AddBoatModal from "../components/owner/AddBoatModal";
 import BoatsManagement from "../components/owner/BoatsManagement";
 import CalendarManagement from "../components/owner/CalendarManagement";
 import PackageManagement from "../components/owner/PackageManagement";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const OwnerDashboard = () => {
+  const { tl } = useLanguage();
   const [activeTab, setActiveTab] = useState("overview");
   const [showAddBoat, setShowAddBoat] = useState(false);
   const [stats, setStats] = useState<OwnerStats>({ listedBoats: 0, totalBookings: 0, totalRevenue: 0, averageRating: "0.0" });
@@ -47,7 +49,7 @@ const OwnerDashboard = () => {
               <div>
                 <p className="text-primary-foreground/80 text-sm mb-2">Welcome back</p>
                 <h1 className="text-3xl md:text-4xl font-heading font-bold text-primary-foreground">
-                  Owner Dashboard
+                  {tl("Owner Dashboard", "Πίνακας Ιδιοκτήτη")}
                 </h1>
               </div>
               <Link to="/owner-profile" className="text-sm font-medium text-primary-foreground/90 hover:text-primary-foreground">
@@ -76,17 +78,17 @@ const OwnerDashboard = () => {
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
                 <TabsList className="grid w-full sm:w-auto grid-cols-4">
-                  <TabsTrigger value="overview" className="text-xs sm:text-sm">Overview</TabsTrigger>
-                  <TabsTrigger value="boats" className="text-xs sm:text-sm">Boats</TabsTrigger>
-                  <TabsTrigger value="calendar" className="text-xs sm:text-sm">Calendar</TabsTrigger>
-                  <TabsTrigger value="packages" className="text-xs sm:text-sm">Packages</TabsTrigger>
+                  <TabsTrigger value="overview" className="text-xs sm:text-sm">{tl("Overview", "Επισκόπηση")}</TabsTrigger>
+                  <TabsTrigger value="boats" className="text-xs sm:text-sm">{tl("Boats", "Σκάφη")}</TabsTrigger>
+                  <TabsTrigger value="calendar" className="text-xs sm:text-sm">{tl("Calendar", "Ημερολόγιο")}</TabsTrigger>
+                  <TabsTrigger value="packages" className="text-xs sm:text-sm">{tl("Packages", "Πακέτα")}</TabsTrigger>
                 </TabsList>
                 <Button
                   onClick={() => setShowAddBoat(true)}
                   className="bg-gradient-accent text-accent-foreground gap-2 w-full sm:w-auto"
                 >
                   <Plus className="h-4 w-4" />
-                  Add Boat
+                  {tl("Add Boat", "Προσθήκη Σκάφους")}
                 </Button>
               </div>
 

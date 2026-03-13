@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { getCustomerBookingHistory, type CustomerHistoryItem } from "@/lib/history";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const isReviewEligible = (booking: CustomerHistoryItem) => {
   const tripDate = new Date(booking.startDate);
@@ -18,6 +19,7 @@ const isReviewEligible = (booking: CustomerHistoryItem) => {
 };
 
 const History = () => {
+  const { tl } = useLanguage();
   const { user, isLoading } = useCurrentUser();
   const [history, setHistory] = useState<CustomerHistoryItem[]>([]);
 
@@ -53,9 +55,9 @@ const History = () => {
         <section className="py-12 border-b border-border bg-muted/30">
           <div className="container mx-auto px-4">
             <p className="text-sm text-muted-foreground">Trip history</p>
-            <h1 className="mt-2 text-4xl font-heading font-bold text-foreground">Bookings and reviews</h1>
+            <h1 className="mt-2 text-4xl font-heading font-bold text-foreground">{tl("Bookings and reviews", "Κρατήσεις και αξιολογήσεις")}</h1>
             <p className="mt-3 max-w-2xl text-muted-foreground">
-              Review requests appear here once the trip date has passed, which is the cleanest point in the workflow to ask for a customer rating.
+              {tl("Review requests appear here once the trip date has passed, which is the cleanest point in the workflow to ask for a customer rating.", "Τα αιτήματα αξιολόγησης εμφανίζονται εδώ αφού περάσει η ημερομηνία εκδρομής, που είναι το κατάλληλο σημείο στη ροή για να ζητηθεί βαθμολογία πελάτη.")}
             </p>
 
             <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -66,7 +68,7 @@ const History = () => {
                     <Badge variant="outline">Trips</Badge>
                   </div>
                   <p className="text-2xl font-heading font-bold text-foreground">{history.length}</p>
-                  <p className="text-sm text-muted-foreground">Total bookings</p>
+                  <p className="text-sm text-muted-foreground">{tl("Total bookings", "Συνολικές κρατήσεις")}</p>
                 </CardContent>
               </Card>
               <Card className="shadow-card">
@@ -76,7 +78,7 @@ const History = () => {
                     <Badge variant="outline">Action</Badge>
                   </div>
                   <p className="text-2xl font-heading font-bold text-foreground">{reviewableTrips}</p>
-                  <p className="text-sm text-muted-foreground">Trips waiting for review</p>
+                  <p className="text-sm text-muted-foreground">{tl("Trips waiting for review", "Εκδρομές που περιμένουν αξιολόγηση")}</p>
                 </CardContent>
               </Card>
               <Card className="shadow-card">
@@ -86,7 +88,7 @@ const History = () => {
                     <Badge variant="outline">Complete</Badge>
                   </div>
                   <p className="text-2xl font-heading font-bold text-foreground">{history.filter((item) => item.hasReview).length}</p>
-                  <p className="text-sm text-muted-foreground">Trips already reviewed</p>
+                  <p className="text-sm text-muted-foreground">{tl("Trips already reviewed", "Εκδρομές που αξιολογήθηκαν")}</p>
                 </CardContent>
               </Card>
             </div>
@@ -98,9 +100,9 @@ const History = () => {
             {!user && !isLoading ? (
               <Card className="shadow-card">
                 <CardContent className="pt-6 space-y-4">
-                  <p className="text-muted-foreground">Sign in to see your booking history and leave reviews.</p>
+                  <p className="text-muted-foreground">{tl("Sign in to see your booking history and leave reviews.", "Συνδέσου για να δεις το ιστορικό κρατήσεων και να αφήσεις αξιολογήσεις.")}</p>
                   <Button asChild className="bg-gradient-accent text-accent-foreground">
-                    <Link to="/">Back to home</Link>
+                    <Link to="/">{tl("Back to home", "Επιστροφή στην αρχική")}</Link>
                   </Button>
                 </CardContent>
               </Card>
@@ -125,16 +127,17 @@ const History = () => {
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                         <Button asChild variant="outline">
                           <Link to={`/boats/${booking.boatId}`}>Boat details</Link>
+                          <Link to={`/boats/${booking.boatId}`}>{tl("Boat details", "Λεπτομέρειες σκάφους")}</Link>
                         </Button>
                         {isReviewEligible(booking) ? (
                           <Button asChild className="bg-gradient-accent text-accent-foreground">
-                            <Link to={`/post-trip-review?bookingId=${booking.id}&boatId=${booking.boatId}`}>Leave review</Link>
+                            <Link to={`/post-trip-review?bookingId=${booking.id}&boatId=${booking.boatId}`}>{tl("Leave review", "Αφήστε αξιολόγηση")}</Link>
                           </Button>
                         ) : booking.hasReview ? (
-                          <Badge className="bg-emerald-500">Review submitted</Badge>
+                          <Badge className="bg-emerald-500">{tl("Review submitted", "Η αξιολόγηση υποβλήθηκε")}</Badge>
                         ) : (
                           <Badge variant="outline" className="gap-1">
-                            <Clock3 className="h-3.5 w-3.5" /> Review after trip
+                            <Clock3 className="h-3.5 w-3.5" /> {tl("Review after trip", "Αξιολόγηση μετά την εκδρομή")}
                           </Badge>
                         )}
                       </div>
@@ -146,6 +149,7 @@ const History = () => {
                   <Card className="shadow-card">
                     <CardContent className="pt-6">
                       <p className="text-muted-foreground">No bookings yet.</p>
+                      <p className="text-muted-foreground">{tl("No bookings yet.", "Δεν υπάρχουν κρατήσεις ακόμη.")}</p>
                     </CardContent>
                   </Card>
                 ) : null}

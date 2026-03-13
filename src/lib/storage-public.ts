@@ -2,6 +2,25 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
 
 const ABSOLUTE_URL = /^https?:\/\//i;
 const DATA_URL = /^data:/i;
+const KNOWN_BUCKETS = new Set([
+  "boat-images",
+  "destination-images",
+  "profile-images",
+  "review-media",
+  "boat-documents",
+  "owner-verification-docs",
+  "chat-attachments",
+  "payment-receipts",
+  "support-attachments",
+  "temp-uploads",
+]);
+
+const encodeStoragePath = (path: string) =>
+  path
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
 
 export const getPublicStorageUrl = (bucket: string, path: string): string => {
   if (!supabaseUrl || !path.trim()) {
@@ -9,7 +28,39 @@ export const getPublicStorageUrl = (bucket: string, path: string): string => {
   }
 
   const normalizedPath = path.replace(/^\/+/, "");
-  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${normalizedPath}`;
+  return `${supabaseUrl}/storage/v1/object/public/${encodeURIComponent(bucket)}/${encodeStoragePath(normalizedPath)}`;
+};
+
+export const parseStorageReference = (
+  value: string | null | undefined,
+  defaultBucket: string,
+): { bucket: string; path: string } | null => {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed || ABSOLUTE_URL.test(trimmed) || DATA_URL.test(trimmed)) {
+    return null;
+  }
+
+  const bucketPrefix = `${defaultBucket}/`;
+  if (trimmed.startsWith(bucketPrefix)) {
+    return {
+      bucket: defaultBucket,
+      path: trimmed.slice(bucketPrefix.length).replace(/^\/+/, ""),
+    };
+  }
+
+  const firstSlash = trimmed.indexOf("/");
+  if (firstSlash > 0) {
+    const maybeBucket = trimmed.slice(0, firstSlash);
+    const maybePath = trimmed.slice(firstSlash + 1).replace(/^\/+/, "");
+    if (KNOWN_BUCKETS.has(maybeBucket) && maybePath) {
+      return { bucket: maybeBucket, path: maybePath };
+    }
+  }
+
+  return {
+    bucket: defaultBucket,
+    path: trimmed.replace(/^\/+/, ""),
+  };
 };
 
 export const resolveStorageImage = (
@@ -35,20 +86,7 @@ export const resolveStorageImage = (
   if (firstSlash > 0) {
     const maybeBucket = trimmed.slice(0, firstSlash);
     const maybePath = trimmed.slice(firstSlash + 1);
-    const knownBuckets = new Set([
-      "boat-images",
-      "destination-images",
-      "profile-images",
-      "review-media",
-      "boat-documents",
-      "owner-verification-docs",
-      "chat-attachments",
-      "payment-receipts",
-      "support-attachments",
-      "temp-uploads",
-    ]);
-
-    if (knownBuckets.has(maybeBucket)) {
+    if (KNOWN_BUCKETS.has(maybeBucket)) {
       return getPublicStorageUrl(maybeBucket, maybePath) || fallback;
     }
   }

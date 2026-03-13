@@ -9,8 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { supabase } from "@/lib/supabase";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const CustomerProfile = () => {
+  const { tl } = useLanguage();
   const { user } = useCurrentUser();
   const [bookings, setBookings] = useState<any[]>([]);
 
@@ -50,7 +52,7 @@ const CustomerProfile = () => {
                   <div className="space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
                       <h1 className="text-2xl md:text-3xl font-heading font-bold text-foreground">{user?.name ?? "Customer"}</h1>
-                      <Badge className="bg-gradient-accent text-accent-foreground">Verified Customer</Badge>
+                      <Badge className="bg-gradient-accent text-accent-foreground">{tl("Verified Customer", "Επαληθευμένος Πελάτης")}</Badge>
                     </div>
                     <p className="text-muted-foreground max-w-2xl">
                       {user?.email ?? "Manage your trips and profile from this page."}
@@ -67,13 +69,14 @@ const CustomerProfile = () => {
             <Card className="shadow-card">
               <CardHeader>
                 <CardTitle className="text-lg">Quick Actions</CardTitle>
+                <CardTitle className="text-lg">{tl("Quick Actions", "Γρήγορες Ενέργειες")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Button className="w-full bg-gradient-accent text-accent-foreground">Edit Profile</Button>
+                <Button className="w-full bg-gradient-accent text-accent-foreground">{tl("Edit Profile", "Επεξεργασία Προφίλ")}</Button>
                 <Button asChild variant="outline" className="w-full">
-                  <Link to="/history">Manage Bookings</Link>
+                  <Link to="/history">{tl("Manage Bookings", "Διαχείριση Κρατήσεων")}</Link>
                 </Button>
-                <Button variant="outline" className="w-full">Saved Boats</Button>
+                <Button variant="outline" className="w-full">{tl("Saved Boats", "Αποθηκευμένα Σκάφη")}</Button>
               </CardContent>
             </Card>
           </div>
@@ -89,7 +92,7 @@ const CustomerProfile = () => {
                     <Badge variant="outline" className="text-[10px]">Live</Badge>
                   </div>
                   <p className="text-2xl font-heading font-bold text-foreground">{completedTrips}</p>
-                  <p className="text-sm text-muted-foreground">Trips Completed</p>
+                  <p className="text-sm text-muted-foreground">{tl("Trips Completed", "Ολοκληρωμένες Εκδρομές")}</p>
                 </CardContent>
               </Card>
               <Card className="shadow-card">
@@ -99,7 +102,7 @@ const CustomerProfile = () => {
                     <Badge variant="outline" className="text-[10px]">Live</Badge>
                   </div>
                   <p className="text-2xl font-heading font-bold text-foreground">0</p>
-                  <p className="text-sm text-muted-foreground">Saved Boats</p>
+                  <p className="text-sm text-muted-foreground">{tl("Saved Boats", "Αποθηκευμένα Σκάφη")}</p>
                 </CardContent>
               </Card>
               <Card className="shadow-card">
@@ -109,7 +112,7 @@ const CustomerProfile = () => {
                     <Badge variant="outline" className="text-[10px]">Live</Badge>
                   </div>
                   <p className="text-2xl font-heading font-bold text-foreground">{upcomingTrips.length}</p>
-                  <p className="text-sm text-muted-foreground">Upcoming Trips</p>
+                  <p className="text-sm text-muted-foreground">{tl("Upcoming Trips", "Επερχόμενες Εκδρομές")}</p>
                 </CardContent>
               </Card>
               <Card className="shadow-card">
@@ -119,17 +122,17 @@ const CustomerProfile = () => {
                     <Badge variant="outline" className="text-[10px]">Live</Badge>
                   </div>
                   <p className="text-2xl font-heading font-bold text-foreground">{completedTrips}</p>
-                  <p className="text-sm text-muted-foreground">Trips Eligible for Review</p>
+                  <p className="text-sm text-muted-foreground">{tl("Trips Eligible for Review", "Εκδρομές για Αξιολόγηση")}</p>
                 </CardContent>
               </Card>
             </div>
 
             <Card className="shadow-card-hover">
               <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-xl">Upcoming Trips</CardTitle>
+                <CardTitle className="text-xl">{tl("Upcoming Trips", "Επερχόμενες Εκδρομές")}</CardTitle>
                 <Button variant="outline" size="sm" className="gap-2">
                   <Compass className="h-4 w-4" />
-                  Explore More Boats
+                  {tl("Explore More Boats", "Δες Περισσότερα Σκάφη")}
                 </Button>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -144,12 +147,6 @@ const CustomerProfile = () => {
                 ))}
               </CardContent>
             </Card>
-
-            <div className="text-center">
-              <Link to="/owner-profile" className="text-aegean hover:text-turquoise transition-colors font-medium">
-                Switch to owner profile view →
-              </Link>
-            </div>
           </div>
         </section>
       </main>

@@ -7,6 +7,7 @@ import heroImage from "@/assets/hero-boat.jpg";
 import { BoatSearchCriteria } from "@/lib/boat-search";
 import { getExperimentVariant, trackExperimentExposure, trackSearchSubmitted } from "@/lib/analytics";
 import DateTimePicker from "./DateTimePicker";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface HeroSectionProps {
   onFindBoats: (criteria: BoatSearchCriteria) => void;
@@ -39,6 +40,7 @@ const calculateDistanceKm = (
 };
 
 const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
+  const { t } = useLanguage();
   const [locationInput, setLocationInput] = useState("");
   const [dateTimeInput, setDateTimeInput] = useState("");
   const [passengersInput, setPassengersInput] = useState("");
@@ -75,11 +77,11 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
 
   const detectLocation = () => {
     if (!navigator.geolocation) {
-      setLocationStatus("Geolocation is not supported in this browser.");
+      setLocationStatus(t("hero.geoUnsupported"));
       return;
     }
 
-    setLocationStatus("Checking nearby supported destinations...");
+    setLocationStatus(t("hero.geoChecking"));
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const nearest = supportedLocations
@@ -96,14 +98,14 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
 
         if (nearest && nearest.distanceKm <= 220) {
           setLocationInput(nearest.name);
-          setLocationStatus(`Location allowed: closest supported pickup is ${nearest.name}.`);
+          setLocationStatus(t("hero.geoAllowed", { location: nearest.name }));
           return;
         }
 
-        setLocationStatus("Your current location is outside our supported pickup islands.");
+        setLocationStatus(t("hero.geoOutside"));
       },
       () => {
-        setLocationStatus("Unable to read your location permission.");
+        setLocationStatus(t("hero.geoPermission"));
       },
       { enableHighAccuracy: true, timeout: 10000 },
     );
@@ -129,13 +131,12 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
           className="max-w-3xl"
         >
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-heading font-bold text-primary-foreground leading-[1.1] mb-4">
-            Discover Boats.
+            {t("hero.titleLine1")}
             <br />
-            <span className="text-turquoise">Explore the Sea.</span>
+            <span className="text-turquoise">{t("hero.titleLine2")}</span>
           </h1>
           <p className="text-lg md:text-xl text-primary-foreground/80 font-body max-w-xl mb-8">
-            Find and book boats instantly for your perfect island adventure in
-            the Greek Mediterranean.
+            {t("hero.subtitle")}
           </p>
         </motion.div>
 
@@ -151,7 +152,7 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
             <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-muted">
               <MapPin className="h-5 w-5 text-aegean shrink-0" />
               <div>
-                <p className="text-xs text-muted-foreground font-medium">Location</p>
+                <p className="text-xs text-muted-foreground font-medium">{t("hero.location")}</p>
                 <input
                   type="text"
                   placeholder="Thassos, Greece"
@@ -164,7 +165,7 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
             <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-muted">
               <Calendar className="h-5 w-5 text-aegean shrink-0" />
               <div className="w-full min-w-0">
-                <p className="text-xs text-muted-foreground font-medium">Date</p>
+                <p className="text-xs text-muted-foreground font-medium">{t("hero.date")}</p>
                 <DateTimePicker
                   value={dateTimeInput}
                   onChange={setDateTimeInput}
@@ -174,7 +175,7 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
             <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-muted">
               <Users className="h-5 w-5 text-aegean shrink-0" />
               <div>
-                <p className="text-xs text-muted-foreground font-medium">Passengers</p>
+                <p className="text-xs text-muted-foreground font-medium">{t("hero.passengers")}</p>
                 <input
                   type="number"
                   min={1}
@@ -188,7 +189,7 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
             </div>
             <Button type="submit" disabled={!isSearchValid} className="bg-gradient-accent text-accent-foreground rounded-xl h-auto py-3 text-base font-semibold gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
               <Search className="h-5 w-5" />
-              {ctaVariant === "search-now" ? "Search Now" : "Find Boats"}
+              {ctaVariant === "search-now" ? t("hero.searchNow") : t("hero.findBoats")}
             </Button>
           </div>
 
@@ -210,7 +211,7 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
               onClick={detectLocation}
               className="text-xs font-medium text-aegean hover:text-turquoise"
             >
-              Use my location
+              {t("hero.useMyLocation")}
             </button>
           </div>
           {locationStatus ? <p className="text-xs text-muted-foreground mt-2 px-1">{locationStatus}</p> : null}
@@ -221,7 +222,7 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
             to={`/boats${locationInput.trim() ? `?location=${encodeURIComponent(locationInput.trim())}` : ""}`}
             className="text-primary-foreground/80 text-sm hover:text-primary-foreground"
           >
-            Open advanced boat finder →
+            {t("hero.advancedFinder")}
           </Link>
         </div>
 
@@ -232,9 +233,9 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
           transition={{ delay: 0.6 }}
           className="flex flex-wrap items-center gap-6 mt-8 text-primary-foreground/60 text-sm"
         >
-          <span>🛡️ Verified boats</span>
-          <span>⭐ 4.9 average rating</span>
-          <span>🌊 500+ trips completed</span>
+          <span>{t("hero.verifiedBoats")}</span>
+          <span>{t("hero.avgRating")}</span>
+          <span>{t("hero.tripsCompleted")}</span>
         </motion.div>
       </div>
     </section>

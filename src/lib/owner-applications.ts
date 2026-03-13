@@ -1,9 +1,20 @@
 import { supabase } from "@/lib/supabase";
 
 export interface OwnerApplicationInput {
+  // Personal
+  phone: string;
+  companyName: string;
+  // Experience
   operatingArea: string;
   yearsExperience: string;
+  licenseNumber: string;
+  boatTypes: string[];
+  // Fleet plans
   boatCount: string;
+  operatingSeason: string;
+  // Online presence
+  website: string;
+  // Notes
   notes: string;
 }
 
@@ -79,11 +90,19 @@ export const submitOwnerApplication = async (input: OwnerApplicationInput): Prom
   }
 
   const notes = [
+    `Phone: ${input.phone.trim()}`,
+    input.companyName.trim() ? `Company: ${input.companyName.trim()}` : null,
     `Operating area: ${input.operatingArea.trim()}`,
     `Years of experience: ${input.yearsExperience.trim()}`,
+    input.licenseNumber.trim() ? `License / certification: ${input.licenseNumber.trim()}` : null,
+    `Boat types: ${input.boatTypes.length > 0 ? input.boatTypes.join(", ") : "Not specified"}`,
     `Boats to list: ${input.boatCount.trim()}`,
+    `Operating season: ${input.operatingSeason.trim()}`,
+    input.website.trim() ? `Website / social: ${input.website.trim()}` : null,
     `Notes: ${input.notes.trim() || "No extra notes provided."}`,
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const { data, error } = await (supabase as any)
     .from("owner_applications")

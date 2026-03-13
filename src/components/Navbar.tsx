@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { Menu, X, ChevronDown } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import NautiqLogo from "./NautiqLogo";
 import { Button } from "./ui/button";
-import { Switch } from "./ui/switch";
 import AuthDialog from "./AuthDialog";
 import { signOut } from "@/lib/auth-hybrid";
 import type { AuthUser } from "@/lib/auth-hybrid";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useLanguage } from "@/contexts/LanguageContext";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,28 +18,21 @@ import {
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
 
-interface NavbarProps {
-  mode?: "customer" | "owner";
-  onModeChange?: (mode: "customer" | "owner") => void;
-}
-
-const Navbar = ({ mode, onModeChange }: NavbarProps) => {
+const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
   const { user: currentUser } = useCurrentUser();
+  const { language, setLanguage, t } = useLanguage();
   const navigate = useNavigate();
-  const location = useLocation();
-  const inferredMode: "customer" | "owner" = location.pathname.includes("owner") ? "owner" : "customer";
-  const activeMode = mode ?? inferredMode;
 
   useEffect(() => {
     setAuthUser(currentUser ?? null);
   }, [currentUser]);
 
-  const handleAuthenticated = async (user: AuthUser) => {
-    setAuthUser(user);
-    navigate("/portal");
+  const handleAuthenticated = async (_user: AuthUser) => {
+    // Full reload so all auth-dependent state refreshes cleanly
+    window.location.href = "/portal";
   };
 
   const handleSignOut = async () => {
@@ -51,14 +44,6 @@ const Navbar = ({ mode, onModeChange }: NavbarProps) => {
     } catch (error) {
       console.error("Sign out failed:", error);
     }
-  };
-
-  const handleModeSwitch = (nextMode: "customer" | "owner") => {
-    if (onModeChange) {
-      onModeChange(nextMode);
-      return;
-    }
-    navigate(nextMode === "owner" ? "/owner-profile" : "/customer-profile");
   };
 
   const handleBecomeOwner = async () => {
@@ -74,18 +59,26 @@ const Navbar = ({ mode, onModeChange }: NavbarProps) => {
         <div className="hidden md:flex items-center gap-6">
           <>
             <Link to="/" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Home
+              {t("nav.home")}
             </Link>
             <Link to="/boats" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Boats
+              {t("nav.boats")}
             </Link>
             <Link to="/destinations" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              Destinations
+              {t("nav.destinations")}
             </Link>
             <Link to="/about" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              About
+              {t("nav.about")}
             </Link>
           </>
+          <Button
+            size="sm"
+            variant="outline"
+            className="rounded-full px-3"
+            onClick={() => setLanguage(language === "en" ? "el" : "en")}
+          >
+            {language === "en" ? "EN" : "EL"}
+          </Button>
           {authUser ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -99,48 +92,39 @@ const Navbar = ({ mode, onModeChange }: NavbarProps) => {
                 <DropdownMenuSeparator />
                 <>
                   <DropdownMenuItem asChild>
-                    <Link to={authUser.isOwner && activeMode === "owner" ? "/owner-profile" : "/customer-profile"}>
-                      Profile
+                    <Link to="/profile">
+                      {t("nav.profile")}
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem asChild>
-                    <Link to="/history">History</Link>
+                    <Link to="/history">{t("nav.history")}</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/favorites">{t("nav.favorites")}</Link>
                   </DropdownMenuItem>
                   {!authUser.isOwner && (
                     <DropdownMenuItem onClick={handleBecomeOwner}>
-                      Become an Owner
+                      {t("nav.becomeOwner")}
                     </DropdownMenuItem>
-                  )}
-                  {authUser.isOwner && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="flex items-center justify-between cursor-default">
-                        <span className="text-sm">Owner Mode</span>
-                        <Switch
-                          checked={activeMode === "owner"}
-                          onCheckedChange={(checked) => handleModeSwitch(checked ? "owner" : "customer")}
-                        />
-                      </DropdownMenuItem>
-                    </>
                   )}
                 </>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
-                  <Link to="/settings">Settings</Link>
+                  <Link to="/settings">{t("nav.settings")}</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link to="/privacy-policy">Privacy & Security</Link>
+                  <Link to="/privacy-policy">{t("nav.privacySecurity")}</Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem asChild>
-                  <Link to="/about">Help & Support</Link>
+                  <Link to="/about">{t("nav.helpSupport")}</Link>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleSignOut}>Sign Out</DropdownMenuItem>
+                <DropdownMenuItem onClick={handleSignOut}>{t("nav.signOut")}</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           ) : (
             <Button size="sm" className="bg-gradient-accent text-accent-foreground rounded-full px-5" onClick={() => setAuthOpen(true)}>
-              Sign In
+              {t("nav.signIn")}
             </Button>
           )}
         </div>
@@ -166,17 +150,20 @@ const Navbar = ({ mode, onModeChange }: NavbarProps) => {
             <div className="p-4 space-y-4">
               <div className="flex flex-col gap-3">
                 <>
-                  <Link to="/" className="text-sm text-muted-foreground py-2" onClick={() => setMobileOpen(false)}>Home</Link>
-                  <Link to="/boats" className="text-sm text-muted-foreground py-2" onClick={() => setMobileOpen(false)}>Boats</Link>
-                  <Link to="/destinations" className="text-sm text-muted-foreground py-2" onClick={() => setMobileOpen(false)}>Destinations</Link>
-                  <Link to="/about" className="text-sm text-muted-foreground py-2" onClick={() => setMobileOpen(false)}>About</Link>
+                  <Link to="/" className="text-sm text-muted-foreground py-2" onClick={() => setMobileOpen(false)}>{t("nav.home")}</Link>
+                  <Link to="/boats" className="text-sm text-muted-foreground py-2" onClick={() => setMobileOpen(false)}>{t("nav.boats")}</Link>
+                  <Link to="/destinations" className="text-sm text-muted-foreground py-2" onClick={() => setMobileOpen(false)}>{t("nav.destinations")}</Link>
+                  <Link to="/about" className="text-sm text-muted-foreground py-2" onClick={() => setMobileOpen(false)}>{t("nav.about")}</Link>
                 </>
               </div>
+              <Button variant="outline" className="w-full rounded-full" onClick={() => setLanguage(language === "en" ? "el" : "en")}>
+                {t("nav.language")}: {language === "en" ? "EN" : "EL"}
+              </Button>
               {authUser ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button variant="outline" className="w-full rounded-full justify-between">
-                      Account Menu
+                      {t("nav.accountMenu")}
                       <ChevronDown className="h-4 w-4" />
                     </Button>
                   </DropdownMenuTrigger>
@@ -185,50 +172,43 @@ const Navbar = ({ mode, onModeChange }: NavbarProps) => {
                     <DropdownMenuSeparator />
                     <>
                       <DropdownMenuItem asChild>
-                        <Link to={authUser.isOwner && activeMode === "owner" ? "/owner-profile" : "/customer-profile"} onClick={() => setMobileOpen(false)}>
-                          Profile
+                        <Link to="/profile" onClick={() => setMobileOpen(false)}>
+                          {t("nav.profile")}
                         </Link>
                       </DropdownMenuItem>
                       <DropdownMenuItem asChild>
                         <Link to="/history" onClick={() => setMobileOpen(false)}>
-                          History
+                          {t("nav.history")}
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link to="/favorites" onClick={() => setMobileOpen(false)}>
+                          {t("nav.favorites")}
                         </Link>
                       </DropdownMenuItem>
                       {!authUser.isOwner && (
                         <DropdownMenuItem onClick={() => { handleBecomeOwner(); setMobileOpen(false); }}>
-                          Become an Owner
+                          {t("nav.becomeOwner")}
                         </DropdownMenuItem>
-                      )}
-                      {authUser.isOwner && (
-                        <>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="flex items-center justify-between cursor-default">
-                            <span className="text-sm">Owner Mode</span>
-                            <Switch
-                              checked={activeMode === "owner"}
-                              onCheckedChange={(checked) => { handleModeSwitch(checked ? "owner" : "customer"); setMobileOpen(false); }}
-                            />
-                          </DropdownMenuItem>
-                        </>
                       )}
                     </>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem asChild>
-                      <Link to="/settings" onClick={() => setMobileOpen(false)}>Settings</Link>
+                      <Link to="/settings" onClick={() => setMobileOpen(false)}>{t("nav.settings")}</Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
-                      <Link to="/privacy-policy" onClick={() => setMobileOpen(false)}>Privacy & Security</Link>
+                      <Link to="/privacy-policy" onClick={() => setMobileOpen(false)}>{t("nav.privacySecurity")}</Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
-                      <Link to="/about" onClick={() => setMobileOpen(false)}>Help & Support</Link>
+                      <Link to="/about" onClick={() => setMobileOpen(false)}>{t("nav.helpSupport")}</Link>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={handleSignOut}>Sign Out</DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleSignOut}>{t("nav.signOut")}</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               ) : (
                 <Button className="w-full bg-gradient-accent text-accent-foreground rounded-full" onClick={() => setAuthOpen(true)}>
-                  Sign In
+                  {t("nav.signIn")}
                 </Button>
               )}
             </div>

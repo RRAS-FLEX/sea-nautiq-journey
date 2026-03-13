@@ -1,5 +1,5 @@
 ﻿import { supabase } from "./supabase";
-import { resolveStorageImage } from "./storage-public";
+import { getPublicStorageUrl, parseStorageReference, resolveStorageImage } from "./storage-public";
 
 export interface BoatOwner {
 	name: string;
@@ -15,6 +15,7 @@ export interface BoatOwner {
 export interface Boat {
 	id: string;
 	image: string;
+	images: string[];
 	name: string;
 	type: string;
 	lengthMeters: number;
@@ -36,11 +37,139 @@ export interface Boat {
 		minNoticeHours: number;
 	};
 	mapQuery: string;
+	skipperRequired: boolean;
+	bookings: number;
+	revenue: number;
 }
 
-const mapRow = (row: any): Boat => ({
+const BOATS_CACHE_KEY = "nautiq:boats-cache:v2";
+const IMAGE_FILE_REGEX = /\.(avif|gif|jpe?g|png|webp|svg)$/i;
+
+const isBrowser = typeof window !== "undefined";
+
+const readCachedBoats = (): Boat[] => {
+	if (!isBrowser) return [];
+	try {
+		const raw = window.localStorage.getItem(BOATS_CACHE_KEY);
+		if (!raw) return [];
+		const parsed = JSON.parse(raw);
+		return Array.isArray(parsed) ? (parsed as Boat[]) : [];
+	} catch {
+		return [];
+	}
+};
+
+const writeCachedBoats = (boats: Boat[]) => {
+	if (!isBrowser) return;
+	try {
+		window.localStorage.setItem(BOATS_CACHE_KEY, JSON.stringify(boats));
+	} catch {
+		// Ignore cache write failures.
+	}
+};
+
+const hasFileExtension = (value: string) => /\.\w{2,6}(\?|$)/.test(value);
+
+const normalizeImageCandidate = (value: string): string => {
+	const trimmed = value.trim();
+	if (!trimmed) return "";
+
+	if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+		try {
+			const parsed = JSON.parse(trimmed);
+			if (Array.isArray(parsed) && parsed.length > 0) {
+				return normalizeImageCandidate(String(parsed[0] ?? ""));
+			}
+		} catch {
+			// Continue to additional parsers.
+		}
+	}
+
+	if (trimmed.includes(",")) {
+		const first = trimmed
+			.split(",")
+			.map((part) => part.trim())
+			.find(Boolean);
+		if (first) {
+			return normalizeImageCandidate(first);
+		}
+	}
+
+	return trimmed;
+};
+
+const getBoatImageCandidates = (row: any): string[] => {
+	const rawImages = row.images;
+	const legacyImage = row.image;
+
+	if (Array.isArray(rawImages)) {
+		const candidates = rawImages
+			.map((value) => normalizeImageCandidate(String(value ?? "")))
+			.filter(Boolean);
+		if (candidates.length > 0) return candidates;
+	}
+
+	if (typeof rawImages === "string" && rawImages.trim()) {
+		const candidate = normalizeImageCandidate(rawImages);
+		if (candidate) return [candidate];
+	}
+
+	if (typeof legacyImage === "string" && legacyImage.trim()) {
+		const candidate = normalizeImageCandidate(legacyImage);
+		if (candidate) return [candidate];
+	}
+
+	return [];
+};
+
+const listFolderImages = async (folderReference: string): Promise<string[]> => {
+	const storageRef = parseStorageReference(folderReference, "boat-images");
+	if (!storageRef) return [];
+
+	const { data, error } = await supabase.storage
+		.from(storageRef.bucket)
+		.list(storageRef.path, {
+			limit: 24,
+			sortBy: { column: "name", order: "asc" },
+		});
+
+	if (error || !Array.isArray(data)) {
+		return [resolveStorageImage(`${folderReference.replace(/\/+$/, "")}/1.jpg`, "boat-images")].filter(Boolean);
+	}
+
+	const imageUrls = data
+		.filter((item) => item.name && IMAGE_FILE_REGEX.test(item.name))
+		.map((item) => getPublicStorageUrl(storageRef.bucket, `${storageRef.path}/${item.name}`))
+		.filter(Boolean);
+
+	if (imageUrls.length > 0) {
+		return imageUrls;
+	}
+
+	return [resolveStorageImage(`${folderReference.replace(/\/+$/, "")}/1.jpg`, "boat-images")].filter(Boolean);
+};
+
+const resolveBoatImages = async (row: any): Promise<string[]> => {
+	const imageCandidates = getBoatImageCandidates(row);
+	if (imageCandidates.length === 0) {
+		return [];
+	}
+
+	const firstCandidate = imageCandidates[0];
+	if (!hasFileExtension(firstCandidate) && !/^https?:\/\//i.test(firstCandidate)) {
+		return listFolderImages(firstCandidate);
+	}
+
+	return imageCandidates.map((candidate) => resolveStorageImage(candidate, "boat-images", candidate));
+};
+
+const mapRow = async (row: any): Promise<Boat> => {
+	const resolvedImages = await resolveBoatImages(row);
+
+	return {
 	id: row.id,
- image: resolveStorageImage(row.image, "boat-images"),
+	images: resolvedImages,
+	image: resolvedImages[0] ?? "https://via.placeholder.com/400x300?text=Boat",
 	name: row.name,
 	type: row.type,
 	lengthMeters: Number(row.length_meters ?? 0),
@@ -73,35 +202,82 @@ const mapRow = (row: any): Boat => ({
 		minNoticeHours: Number(row.min_notice_hours ?? 24),
 	},
 	mapQuery: row.map_query ?? `${row.location}, Greece`,
-});
+	skipperRequired: Boolean(row.skipper_required),
+	bookings: Number(row.bookings ?? 0),
+	revenue: Number(row.revenue ?? 0),
+	};
+};
 
 const BOAT_SELECT =
 	"*, boat_features(feature), users(name, owner_title, owner_bio, owner_languages, is_superhost, response_rate, created_at)";
 const BOAT_SELECT_FALLBACK =
-	"id, name, type, location, capacity, price_per_day, rating, image, bookings, users(name, created_at), boat_features(feature)";
+	"*, users(name, created_at), boat_features(feature)";
+const BOAT_SELECT_MINIMAL =
+	"id, name, type, location, capacity, price_per_day, rating, images, image, skipper_required, bookings, revenue, status, created_at";
+
+const isPublicBoatStatus = (status: unknown): boolean => {
+	const normalized = String(status ?? "").trim().toLowerCase();
+	if (!normalized) return true;
+	return !["inactive", "maintenance", "archived", "draft"].includes(normalized);
+};
+
+const queryBoats = (selectClause: string) =>
+	(supabase as any)
+		.from("boats")
+		.select(selectClause);
+
+const fetchBoatsFromSupabase = async () => {
+	const primary = await queryBoats(BOAT_SELECT);
+	if (!primary.error) {
+		const visibleRows = (primary.data ?? []).filter((row: any) => isPublicBoatStatus(row?.status));
+		return Promise.all(visibleRows.map(mapRow));
+	}
+
+	const relationFallback = await queryBoats(BOAT_SELECT_FALLBACK);
+	if (!relationFallback.error) {
+		const visibleRows = (relationFallback.data ?? []).filter((row: any) => isPublicBoatStatus(row?.status));
+		return Promise.all(visibleRows.map(mapRow));
+	}
+
+	const minimal = await queryBoats(BOAT_SELECT_MINIMAL);
+	if (!minimal.error) {
+		const visibleRows = (minimal.data ?? []).filter((row: any) => isPublicBoatStatus(row?.status));
+		return Promise.all(visibleRows.map(mapRow));
+	}
+
+	const minimalWithoutStatus = await (supabase as any)
+		.from("boats")
+		.select(BOAT_SELECT_MINIMAL);
+
+	if (!minimalWithoutStatus.error) {
+		const activeOrUnknown = (minimalWithoutStatus.data ?? []).filter((row: any) => isPublicBoatStatus(row?.status));
+		return Promise.all(activeOrUnknown.map(mapRow));
+	}
+
+	throw new Error(
+		minimalWithoutStatus.error?.message ||
+			minimal.error?.message ||
+			relationFallback.error?.message ||
+			primary.error?.message ||
+			"Failed to load boats",
+	);
+};
 
 export const getBoats = async (): Promise<Boat[]> => {
-	const { data, error } = await (supabase as any)
-		.from("boats")
-		.select(BOAT_SELECT)
-		.eq("status", "active")
-		.order("rating", { ascending: false });
-
-	if (!error) {
-		return (data ?? []).map(mapRow);
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		try {
+			const boats = await fetchBoatsFromSupabase();
+			writeCachedBoats(boats);
+			return boats;
+		} catch {
+			if (attempt === 1) {
+				const cached = readCachedBoats();
+				if (cached.length > 0) return cached;
+			}
+		}
 	}
 
-	const { data: fallbackData, error: fallbackError } = await (supabase as any)
-		.from("boats")
-		.select(BOAT_SELECT_FALLBACK)
-		.eq("status", "active")
-		.order("rating", { ascending: false });
-
-	if (fallbackError) {
-		throw new Error(fallbackError.message);
-	}
-
-	return (fallbackData ?? []).map(mapRow);
+	return [];
 };
 
 export const getBoatById = async (id: string): Promise<Boat | null> => {
@@ -121,7 +297,17 @@ export const getBoatById = async (id: string): Promise<Boat | null> => {
 		.eq("id", id)
 		.maybeSingle();
 
-	if (fallbackError || !fallbackData) return null;
-	return mapRow(fallbackData);
+	if (!fallbackError && fallbackData) {
+		return mapRow(fallbackData);
+	}
+
+	const { data: minimalData, error: minimalError } = await (supabase as any)
+		.from("boats")
+		.select(BOAT_SELECT_MINIMAL)
+		.eq("id", id)
+		.maybeSingle();
+
+	if (minimalError || !minimalData) return null;
+	return mapRow(minimalData);
 };
 

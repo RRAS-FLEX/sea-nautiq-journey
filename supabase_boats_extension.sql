@@ -16,6 +16,8 @@ alter table public.boats add column if not exists response_time text;
 alter table public.boats add column if not exists map_query text;
 alter table public.boats add column if not exists unavailable_dates text[] default '{}';
 alter table public.boats add column if not exists min_notice_hours integer default 24;
+alter table public.boats add column if not exists skipper_required boolean default false;
+alter table public.boats add column if not exists documents_folder text;
 
 -- ── 2. Add owner profile columns to users table ──
 alter table public.users add column if not exists owner_title text;
@@ -157,3 +159,24 @@ update public.users set
   is_superhost    = true,
   response_rate   = 100
 where id = 'a6000000-0000-0000-0000-000000000006';
+
+-- ── 5. Favorites table for customer saved boats ──
+create table if not exists public.favorites (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  boat_id uuid not null references public.boats(id) on delete cascade,
+  created_at timestamp with time zone not null default now(),
+  unique(user_id, boat_id)
+);
+
+create index if not exists idx_favorites_user_id on public.favorites(user_id);
+create index if not exists idx_favorites_boat_id on public.favorites(boat_id);
+
+alter table public.favorites enable row level security;
+
+drop policy if exists "Users can manage own favorites" on public.favorites;
+create policy "Users can manage own favorites"
+on public.favorites
+for all to authenticated
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);

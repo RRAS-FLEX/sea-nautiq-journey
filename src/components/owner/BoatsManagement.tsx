@@ -65,6 +65,16 @@ const BoatsManagement = ({ onAddBoat }: BoatsManagementProps) => {
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-1 mt-2">
+                      {boat.skipperRequired ? (
+                        <Badge variant="outline" className="text-[10px]">
+                          Skipper required
+                        </Badge>
+                      ) : null}
+                      {boat.documents.length > 0 ? (
+                        <Badge variant="outline" className="text-[10px]">
+                          {boat.documents.length} papers uploaded
+                        </Badge>
+                      ) : null}
                       {boat.features.slice(0, 3).map((feature, idx) => (
                         <Badge key={idx} variant="outline" className="text-[10px]">
                           {feature}

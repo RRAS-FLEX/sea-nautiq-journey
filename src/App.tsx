@@ -2,6 +2,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { GoogleOAuthProvider } from "@react-oauth/google";
+import { AuthProvider } from "@/contexts/AuthContext";
+import { LanguageProvider } from "@/contexts/LanguageContext";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -23,6 +25,7 @@ import Chat from "./pages/Chat.tsx";
 import History from "./pages/History.tsx";
 import OwnerFleet from "./pages/OwnerFleet.tsx";
 import BecomeOwner from "./pages/BecomeOwner.tsx";
+import Favorites from "./pages/Favorites.tsx";
 import Settings from "./pages/Settings.tsx";
 import PostTripReview from "./pages/PostTripReview.tsx";
 import BusinessPromotions from "./pages/BusinessPromotions.tsx";
@@ -115,6 +118,10 @@ const RoleRouter = () => {
     return <OwnerProfile />;
   }
 
+  if (role === "customer") {
+    return <CustomerProfile />;
+  }
+
   return <Index />;
 };
 
@@ -163,6 +170,7 @@ const AppRoutes = () => (
       <Route path="/owner-dashboard" element={<OwnerRoute><OwnerDashboard /></OwnerRoute>} />
       <Route path="/owners/:ownerSlug" element={<OwnerFleet />} />
       <Route path="/portal" element={<RoleRouter />} />
+      <Route path="/profile" element={<RoleRouter />} />
       <Route path="/admin" element={<Navigate to="/portal" replace />} />
       <Route path="/settings" element={<Settings />} />
       <Route path="/customer-profile" element={<CustomerRoute><CustomerProfile /></CustomerRoute>} />
@@ -171,6 +179,7 @@ const AppRoutes = () => (
       <Route path="/booking" element={<Booking />} />
       <Route path="/chat" element={<Chat />} />
       <Route path="/become-owner" element={<BecomeOwner />} />
+      <Route path="/favorites" element={<Favorites />} />
       <Route path="/post-trip-review" element={<PostTripReview />} />
       <Route path="/business-promotions" element={<BusinessPromotions />} />
       <Route path="/privacy-policy" element={<PrivacyPolicy />} />
@@ -189,13 +198,17 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      {hasUsableGoogleClientId ? (
-        <GoogleOAuthProvider clientId={googleClientId}>
-          <AppRoutes />
-        </GoogleOAuthProvider>
-      ) : (
-        <AppRoutes />
-      )}
+      <LanguageProvider>
+        <AuthProvider>
+          {hasUsableGoogleClientId ? (
+            <GoogleOAuthProvider clientId={googleClientId}>
+              <AppRoutes />
+            </GoogleOAuthProvider>
+          ) : (
+            <AppRoutes />
+          )}
+        </AuthProvider>
+      </LanguageProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );

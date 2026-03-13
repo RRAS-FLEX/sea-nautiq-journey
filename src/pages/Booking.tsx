@@ -21,6 +21,7 @@ import { signInWithGoogle } from "@/lib/auth-hybrid";
 import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const packages = [
   { id: "three-hours", label: "3 Hour Escape", hours: 3, multiplier: 0.45, baseFuelLitres: 24, vibe: "Quick swim stops and golden-hour speed." },
@@ -42,6 +43,7 @@ const Booking = () => {
   const [searchParams] = useSearchParams();
   const { user: sessionUser } = useCurrentUser();
   const { toast } = useToast();
+  const { tl } = useLanguage();
   const boatId = searchParams.get("boatId");
   const boatNameFromQuery = searchParams.get("boat") ?? "Selected boat";
   const [allBoats, setAllBoats] = useState<Boat[]>([]);
@@ -114,6 +116,12 @@ const Booking = () => {
 
     loadOwnerUpgrades();
   }, [boat?.id]);
+
+  useEffect(() => {
+    if (boat?.skipperRequired) {
+      setIncludeSkipper(true);
+    }
+  }, [boat?.skipperRequired]);
 
   const selectedPackage = packages.find((pkg) => pkg.id === selectedPackageId) ?? packages[1];
   const basePackagePrice = Math.round(dailyRate * selectedPackage.multiplier);
@@ -194,8 +202,8 @@ const Booking = () => {
   const handleConfirmBooking = async () => {
     if (!boat) {
       toast({
-        title: "Boat not found",
-        description: "Open the boat profile again and retry the booking.",
+        title: tl("Boat not found", "Το σκάφος δεν βρέθηκε"),
+        description: tl("Open the boat profile again and retry the booking.", "Άνοιξε ξανά το προφίλ του σκάφους και δοκίμασε ξανά την κράτηση."),
         variant: "destructive",
       });
       return;
@@ -203,8 +211,8 @@ const Booking = () => {
 
     if (!customerName.trim() || !customerEmail.trim()) {
       toast({
-        title: "Missing customer details",
-        description: "Add your full name and email before confirming the booking.",
+        title: tl("Missing customer details", "Λείπουν στοιχεία πελάτη"),
+        description: tl("Add your full name and email before confirming the booking.", "Συμπλήρωσε ονοματεπώνυμο και email πριν την επιβεβαίωση της κράτησης."),
         variant: "destructive",
       });
       return;
@@ -212,8 +220,8 @@ const Booking = () => {
 
     if (!selectedDate) {
       toast({
-        title: "Select a date",
-        description: "Choose an available date from the calendar before confirming.",
+        title: tl("Select a date", "Επίλεξε ημερομηνία"),
+        description: tl("Choose an available date from the calendar before confirming.", "Επίλεξε διαθέσιμη ημερομηνία από το ημερολόγιο πριν την επιβεβαίωση."),
         variant: "destructive",
       });
       return;
@@ -221,8 +229,8 @@ const Booking = () => {
 
     if (!paymentMethod) {
       toast({
-        title: "Select payment method",
-        description: "Choose a payment method before confirming.",
+        title: tl("Select payment method", "Επίλεξε τρόπο πληρωμής"),
+        description: tl("Choose a payment method before confirming.", "Επίλεξε τρόπο πληρωμής πριν την επιβεβαίωση."),
         variant: "destructive",
       });
       return;
@@ -230,8 +238,8 @@ const Booking = () => {
 
     if (!paymentPlan) {
       toast({
-        title: "Select payment plan",
-        description: "Choose deposit or full payment before confirming.",
+        title: tl("Select payment plan", "Επίλεξε πλάνο πληρωμής"),
+        description: tl("Choose deposit or full payment before confirming.", "Επίλεξε προκαταβολή ή πλήρη πληρωμή πριν την επιβεβαίωση."),
         variant: "destructive",
       });
       return;
@@ -239,8 +247,8 @@ const Booking = () => {
 
     if (paymentMethod !== "manual" && (!cardholderName.trim() || !cardNumber.trim() || !cardExpiry.trim() || !cardCvc.trim())) {
       toast({
-        title: "Card details required",
-        description: "Complete card details to continue with online payment.",
+        title: tl("Card details required", "Απαιτούνται στοιχεία κάρτας"),
+        description: tl("Complete card details to continue with online payment.", "Συμπλήρωσε τα στοιχεία κάρτας για να συνεχίσεις με online πληρωμή."),
         variant: "destructive",
       });
       return;
@@ -279,10 +287,10 @@ const Booking = () => {
       paymentMethod,
     });
     toast({
-      title: "Booking confirmed",
+      title: tl("Booking confirmed", "Η κράτηση επιβεβαιώθηκε"),
       description: shouldQueueCustomerEmail
-        ? `Owner notified and confirmation email queued for ${result.customerEmail?.toEmail}. Charged now: €${amountDueNow}.`
-        : "Owner notified. Google sign-in booking confirmed in-app.",
+        ? tl(`Owner notified and confirmation email queued for ${result.customerEmail?.toEmail}. Charged now: €${amountDueNow}.`, `Ο ιδιοκτήτης ενημερώθηκε και το email επιβεβαίωσης μπήκε σε ουρά για ${result.customerEmail?.toEmail}. Χρέωση τώρα: €${amountDueNow}.`)
+        : tl("Owner notified. Google sign-in booking confirmed in-app.", "Ο ιδιοκτήτης ενημερώθηκε. Η κράτηση με Google sign-in επιβεβαιώθηκε εντός εφαρμογής."),
     });
 
     if (paymentMethod === "stripe" && stripePaymentLink) {
@@ -295,8 +303,8 @@ const Booking = () => {
       await signInWithGoogle(window.location.href);
     } catch (error) {
       toast({
-        title: "Google sign-in failed",
-        description: error instanceof Error ? error.message : "Try again or continue with email.",
+        title: tl("Google sign-in failed", "Αποτυχία σύνδεσης Google"),
+        description: error instanceof Error ? error.message : tl("Try again or continue with email.", "Δοκίμασε ξανά ή συνέχισε με email."),
         variant: "destructive",
       });
     }
@@ -309,22 +317,22 @@ const Booking = () => {
       <main className="pt-16">
         <section className="border-b border-border bg-gradient-ocean py-14 md:py-18">
           <div className="container mx-auto px-4">
-            <p className="text-primary-foreground/80 text-sm mb-2">Booking</p>
+            <p className="text-primary-foreground/80 text-sm mb-2">{tl("Booking", "Κράτηση")}</p>
             <h1 className="text-4xl md:text-5xl font-heading font-bold text-primary-foreground mb-4">
-              Complete your booking
+              {tl("Complete your booking", "Ολοκλήρωσε την κράτησή σου")}
             </h1>
             <p className="text-primary-foreground/70 max-w-2xl">
-              Secure your trip for {boatName} with preferred date, guest count, and contact details.
+              {tl("Secure your trip for", "Κλείσε την εκδρομή σου για")} {boatName} {tl("with preferred date, guest count, and contact details.", "με ημερομηνία, αριθμό επισκεπτών και στοιχεία επικοινωνίας.")}
             </p>
             <div className="flex flex-wrap gap-2 mt-5">
               <Badge className="bg-primary-foreground/15 text-primary-foreground border-primary-foreground/20">
-                Live package pricing
+                {tl("Live package pricing", "Ζωντανή τιμολόγηση πακέτων")}
               </Badge>
               <Badge className="bg-primary-foreground/15 text-primary-foreground border-primary-foreground/20">
-                Fuel-sensitive estimate
+                {tl("Fuel-sensitive estimate", "Εκτίμηση βάσει καυσίμων")}
               </Badge>
               <Badge className="bg-primary-foreground/15 text-primary-foreground border-primary-foreground/20">
-                Owner notification workflow
+                {tl("Owner notification workflow", "Ροή ειδοποίησης ιδιοκτήτη")}
               </Badge>
             </div>
           </div>
@@ -336,7 +344,7 @@ const Booking = () => {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <CalendarDays className="h-5 w-5 text-aegean" />
-                  Booking details
+                  {tl("Booking details", "Λεπτομέρειες κράτησης")}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -477,9 +485,13 @@ const Booking = () => {
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="font-medium text-foreground">Include skipper</p>
-                          <p className="text-xs text-muted-foreground">Professional captain for smoother routing</p>
+                          <p className="text-xs text-muted-foreground">
+                            {boat?.skipperRequired
+                              ? "Required by this boat owner"
+                              : "Professional captain for smoother routing"}
+                          </p>
                         </div>
-                        <Switch checked={includeSkipper} onCheckedChange={setIncludeSkipper} />
+                        <Switch checked={includeSkipper} onCheckedChange={setIncludeSkipper} disabled={boat?.skipperRequired} />
                       </div>
                       <div className="flex items-center justify-between">
                         <div>

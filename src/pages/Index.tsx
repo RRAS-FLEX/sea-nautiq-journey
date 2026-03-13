@@ -7,12 +7,10 @@ import TopPackages from "@/components/TopPackages";
 import Destinations from "@/components/Destinations";
 import HowItWorks from "@/components/HowItWorks";
 import OwnerCTA from "@/components/OwnerCTA";
-import OwnerDashboardPreview from "@/components/OwnerDashboardPreview";
 import Footer from "@/components/Footer";
 import { BoatSearchCriteria } from "@/lib/boat-search";
 
 const Index = () => {
-  const [mode, setMode] = useState<"customer" | "owner">("customer");
   const [searchCriteria, setSearchCriteria] = useState<BoatSearchCriteria | null>(null);
 
   useSEO({
@@ -29,24 +27,16 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <Navbar mode={mode} onModeChange={setMode} />
+      <Navbar />
 
-      {mode === "customer" ? (
-        <>
-          <HeroSection onFindBoats={handleFindBoats} />
-          <FeaturedBoats searchCriteria={searchCriteria} />
-          <TopPackages />
-          <Destinations />
-          <HowItWorks />
-          <OwnerCTA />
-        </>
-      ) : (
-        <>
-          <div className="pt-16" />
-          <OwnerDashboardPreview />
-          <OwnerCTA />
-        </>
-      )}
+      <>
+        <HeroSection onFindBoats={handleFindBoats} />
+        <FeaturedBoats searchCriteria={searchCriteria} />
+        <TopPackages />
+        <Destinations />
+        <HowItWorks />
+        <OwnerCTA />
+      </>
 
       <Footer />
     </div>

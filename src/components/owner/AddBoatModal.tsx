@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Checkbox } from "../ui/checkbox";
+import { Textarea } from "../ui/textarea";
 import {
   Select,
   SelectContent,
@@ -51,21 +52,37 @@ const DOCUMENT_LABELS = [
   "Port Authority Permit",
 ];
 
+const FORM_STEPS = ["Basics", "Details", "Media & Features", "Documents"];
+
 const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
   const isEdit = Boolean(boat);
   const docInputRef = useRef<HTMLInputElement>(null);
+  const [currentStep, setCurrentStep] = useState(1);
 
   const [formData, setFormData] = useState({
     name: boat?.name ?? "",
     type: boat?.type ?? "Motor Yacht",
     location: boat?.location ?? "Thassos",
+    description: boat?.description ?? "",
+    lengthMeters: boat?.lengthMeters ?? 8,
+    year: boat?.year ?? new Date().getFullYear(),
+    cruisingSpeedKnots: boat?.cruisingSpeedKnots ?? 22,
+    fuelBurnLitresPerHour: boat?.fuelBurnLitresPerHour ?? 16,
+    departureMarina: boat?.departureMarina ?? "",
+    cancellationPolicy: boat?.cancellationPolicy ?? "Free cancellation up to 72 hours before departure",
+    responseTime: boat?.responseTime ?? "Usually replies within 30 minutes",
+    mapQuery: boat?.mapQuery ?? "",
+    unavailableDatesInput: (boat?.unavailableDates ?? []).join(", "),
+    minNoticeHours: boat?.minNoticeHours ?? 24,
     capacity: boat?.capacity ?? 4,
     pricePerDay: boat?.pricePerDay ?? 500,
     image: boat?.image ?? "",
+    skipperRequired: boat?.skipperRequired ?? false,
   });
 
   const [features, setFeatures] = useState<string[]>(boat?.features ?? ["Life Jackets"]);
   const [localImagePreview, setLocalImagePreview] = useState<string>("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [documents, setDocuments] = useState<BoatDocument[]>(boat?.documents ?? []);
   const [docLabelIndex, setDocLabelIndex] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -81,6 +98,7 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
   const handleImageFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    setImageFile(file);
     const reader = new FileReader();
     reader.onloadend = () => {
       const imageData = typeof reader.result === "string" ? reader.result : "";
@@ -100,7 +118,13 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
         const dataUrl = typeof reader.result === "string" ? reader.result : "";
         setDocuments((prev) => [
           ...prev,
-          { name: file.name, dataUrl, filePath: dataUrl, fileType: file.type },
+          {
+            name: `${DOCUMENT_LABELS[docLabelIndex] ?? "Document"} - ${file.name}`,
+            dataUrl,
+            filePath: "",
+            fileType: file.type,
+            file,
+          },
         ]);
       };
       reader.readAsDataURL(file);
@@ -125,17 +149,76 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
     if (suggestion) setFormData((prev) => ({ ...prev, pricePerDay: suggestion }));
   };
 
+  const validateStep = (step: number) => {
+    if (step === 1) {
+      return (
+        formData.name.trim().length > 0 &&
+        formData.type.trim().length > 0 &&
+        formData.location.trim().length > 0 &&
+        formData.capacity > 0 &&
+        formData.pricePerDay > 0 &&
+        formData.description.trim().length > 0
+      );
+    }
+
+    if (step === 2) {
+      return (
+        formData.lengthMeters > 0 &&
+        formData.year > 1900 &&
+        formData.cruisingSpeedKnots > 0 &&
+        formData.fuelBurnLitresPerHour >= 0 &&
+        formData.departureMarina.trim().length > 0 &&
+        formData.cancellationPolicy.trim().length > 0 &&
+        formData.responseTime.trim().length > 0 &&
+        formData.mapQuery.trim().length > 0 &&
+        formData.minNoticeHours >= 0
+      );
+    }
+
+    return true;
+  };
+
+  const handleNextStep = () => {
+    if (!validateStep(currentStep)) {
+      return;
+    }
+
+    setCurrentStep((step) => Math.min(FORM_STEPS.length, step + 1));
+  };
+
+  const handlePrevStep = () => {
+    setCurrentStep((step) => Math.max(1, step - 1));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
+    const unavailableDates = formData.unavailableDatesInput
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean);
+
     const payload = {
       name: formData.name,
       type: formData.type,
       location: formData.location,
+      description: formData.description,
+      lengthMeters: formData.lengthMeters,
+      year: formData.year,
+      cruisingSpeedKnots: formData.cruisingSpeedKnots,
+      fuelBurnLitresPerHour: formData.fuelBurnLitresPerHour,
+      departureMarina: formData.departureMarina,
+      cancellationPolicy: formData.cancellationPolicy,
+      responseTime: formData.responseTime,
+      mapQuery: formData.mapQuery,
+      unavailableDates,
+      minNoticeHours: formData.minNoticeHours,
       capacity: formData.capacity,
       pricePerDay: formData.pricePerDay,
       image: formData.image || "https://via.placeholder.com/400x300?text=Boat",
+      imageFile,
       features,
+      skipperRequired: formData.skipperRequired,
       documents,
       status: (boat?.status ?? "active") as "active" | "inactive" | "maintenance",
       bookings: boat?.bookings ?? 0,
@@ -170,207 +253,222 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
 
         <CardContent className="pt-6">
           <form onSubmit={handleSubmit} className="space-y-6">
-            {/* Basic Info */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Boat Name</Label>
-                <Input
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  placeholder="e.g., Sunset Sailor"
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="type">Boat Type</Label>
-                <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })}>
-                  <SelectTrigger id="type"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Motor Yacht">Motor Yacht</SelectItem>
-                    <SelectItem value="Speed Boat">Speed Boat</SelectItem>
-                    <SelectItem value="Catamaran">Catamaran</SelectItem>
-                    <SelectItem value="Luxury Yacht">Luxury Yacht</SelectItem>
-                    <SelectItem value="Sailboat">Sailboat</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="location">Location</Label>
-                <Select value={formData.location} onValueChange={(value) => setFormData({ ...formData, location: value })}>
-                  <SelectTrigger id="location"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Thassos">Thassos</SelectItem>
-                    <SelectItem value="Halkidiki">Halkidiki</SelectItem>
-                    <SelectItem value="Mykonos">Mykonos</SelectItem>
-                    <SelectItem value="Santorini">Santorini</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="capacity">Guest Capacity</Label>
-                <Input
-                  id="capacity"
-                  type="number"
-                  min="2"
-                  max="20"
-                  value={formData.capacity}
-                  onChange={(e) => setFormData({ ...formData, capacity: Number(e.target.value) || 2 })}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="price">Price Per Day (â‚¬)</Label>
-                  <Button type="button" variant="outline" size="sm" onClick={applySuggestedPrice}>Suggest</Button>
+            <div className="grid grid-cols-4 gap-2">
+              {FORM_STEPS.map((step, index) => (
+                <div key={step} className="space-y-1">
+                  <div className={`h-1 rounded-full ${index + 1 <= currentStep ? "bg-aegean" : "bg-muted"}`} />
+                  <p className={`text-xs ${index + 1 === currentStep ? "text-foreground" : "text-muted-foreground"}`}>
+                    {index + 1}. {step}
+                  </p>
                 </div>
-                <Input
-                  id="price"
-                  type="number"
-                  min="100"
-                  value={formData.pricePerDay}
-                  onChange={(e) => setFormData({ ...formData, pricePerDay: Number(e.target.value) || 100 })}
-                  required
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="image">Image URL (optional)</Label>
-                <Input
-                  id="image"
-                  type="url"
-                  value={formData.image.startsWith("data:") ? "" : formData.image}
-                  onChange={(e) => setFormData({ ...formData, image: e.target.value })}
-                  placeholder="https://example.com/boat.jpg"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="image-file">Upload Image from Computer</Label>
-                <Input id="image-file" type="file" accept="image/*" onChange={handleImageFileChange} />
-              </div>
+              ))}
             </div>
 
-            {(localImagePreview || formData.image) && (
-              <div className="space-y-2">
-                <Label>Image Preview</Label>
-                <img
-                  src={localImagePreview || resolveStorageImage(formData.image, "boat-images", formData.image)}
-                  alt="Boat preview"
-                  className="h-44 w-full rounded-xl object-cover border border-border"
-                />
+            {currentStep === 1 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="name">Boat Name</Label>
+                  <Input id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g., Sunset Sailor" required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="type">Boat Type</Label>
+                  <Select value={formData.type} onValueChange={(value) => setFormData({ ...formData, type: value })}>
+                    <SelectTrigger id="type"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Motor Yacht">Motor Yacht</SelectItem>
+                      <SelectItem value="Speed Boat">Speed Boat</SelectItem>
+                      <SelectItem value="Catamaran">Catamaran</SelectItem>
+                      <SelectItem value="Luxury Yacht">Luxury Yacht</SelectItem>
+                      <SelectItem value="Sailboat">Sailboat</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="location">Location</Label>
+                  <Select value={formData.location} onValueChange={(value) => setFormData({ ...formData, location: value })}>
+                    <SelectTrigger id="location"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Thassos">Thassos</SelectItem>
+                      <SelectItem value="Halkidiki">Halkidiki</SelectItem>
+                      <SelectItem value="Mykonos">Mykonos</SelectItem>
+                      <SelectItem value="Santorini">Santorini</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="capacity">Guest Capacity</Label>
+                  <Input id="capacity" type="number" min="2" max="20" value={formData.capacity} onChange={(e) => setFormData({ ...formData, capacity: Number(e.target.value) || 2 })} required />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="price">Price Per Day (€)</Label>
+                    <Button type="button" variant="outline" size="sm" onClick={applySuggestedPrice}>Suggest</Button>
+                  </div>
+                  <Input id="price" type="number" min="100" value={formData.pricePerDay} onChange={(e) => setFormData({ ...formData, pricePerDay: Number(e.target.value) || 100 })} required />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="description">Description</Label>
+                  <Textarea id="description" value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} placeholder="Describe the boat and guest experience" rows={4} required />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <label className="flex items-center gap-3 rounded-lg border border-border p-3 cursor-pointer hover:bg-muted/50">
+                    <Checkbox checked={formData.skipperRequired} onCheckedChange={(checked) => setFormData({ ...formData, skipperRequired: Boolean(checked) })} />
+                    <div>
+                      <span className="text-sm font-medium text-foreground">Skipper required</span>
+                      <p className="text-xs text-muted-foreground">Enable this if customers must book with a skipper.</p>
+                    </div>
+                  </label>
+                </div>
               </div>
             )}
 
-            <div className="rounded-xl border border-border p-4 bg-muted/30">
-              <p className="text-sm text-muted-foreground">Estimated monthly revenue (12 booked days)</p>
-              <p className="text-2xl font-semibold text-foreground mt-1">â‚¬{estimatedMonthlyRevenue.toLocaleString()}</p>
-            </div>
-
-            {/* Features */}
-            <div className="space-y-3">
-              <Label>Boat Features (toggle what you offer)</Label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {BOAT_FEATURE_OPTIONS.map((feature) => (
-                  <label
-                    key={feature}
-                    className="flex items-center gap-2 rounded-lg border border-border p-3 cursor-pointer hover:bg-muted/50"
-                  >
-                    <Checkbox
-                      checked={features.includes(feature)}
-                      onCheckedChange={() => handleToggleFeature(feature)}
-                    />
-                    <span className="text-sm text-foreground">{feature}</span>
-                  </label>
-                ))}
-              </div>
-              {features.length > 0 && (
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {features.map((feature) => (
-                    <span key={feature} className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground">
-                      {feature}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Documents / Papers */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-aegean" />
-                <Label>Boat Documents &amp; Papers</Label>
-              </div>
-              <p className="text-xs text-muted-foreground">Upload registration, insurance, permits, licenses, etc. (PDF or images).</p>
-
-              {/* Quick-label suggestions */}
-              <div className="flex flex-wrap gap-2">
-                {DOCUMENT_LABELS.map((label, i) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => setDocLabelIndex(i)}
-                    className={`rounded-full border px-3 py-1 text-xs transition-colors ${
-                      docLabelIndex === i
-                        ? "border-aegean bg-aegean/10 text-foreground"
-                        : "border-border text-muted-foreground hover:border-aegean/40"
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              <div
-                className="rounded-xl border-2 border-dashed border-border p-6 text-center cursor-pointer hover:border-aegean/50 transition-colors"
-                onClick={() => docInputRef.current?.click()}
-              >
-                <UploadCloud className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-                <p className="text-sm text-muted-foreground">Click to upload document</p>
-                <p className="text-xs text-muted-foreground mt-1">PDF, JPG, PNG accepted</p>
-              </div>
-              <input
-                ref={docInputRef}
-                type="file"
-                accept="application/pdf,image/*"
-                multiple
-                className="hidden"
-                onChange={handleDocumentUpload}
-              />
-
-              {documents.length > 0 && (
+            {currentStep === 2 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  {documents.map((doc, index) => (
-                    <div key={index} className="flex items-center gap-3 rounded-lg border border-border p-3">
-                      <FileText className="h-4 w-4 text-aegean shrink-0" />
-                      <Input
-                        value={doc.name}
-                        onChange={(e) => renameDocument(index, e.target.value)}
-                        className="flex-1 h-7 text-sm px-2"
-                      />
-                      {doc.fileType.startsWith("image/") ? (
-                        <a href={doc.dataUrl} target="_blank" rel="noreferrer" className="text-xs text-aegean hover:underline shrink-0">View</a>
-                      ) : (
-                        <a href={doc.dataUrl} download={doc.name} className="text-xs text-aegean hover:underline shrink-0">Download</a>
-                      )}
-                      <button type="button" onClick={() => removeDocument(index)} className="text-destructive hover:opacity-80 shrink-0">
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
+                  <Label htmlFor="lengthMeters">Length (meters)</Label>
+                  <Input id="lengthMeters" type="number" min="1" step="0.1" value={formData.lengthMeters} onChange={(e) => setFormData({ ...formData, lengthMeters: Number(e.target.value) || 1 })} required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="year">Year</Label>
+                  <Input id="year" type="number" min="1950" max="2100" value={formData.year} onChange={(e) => setFormData({ ...formData, year: Number(e.target.value) || new Date().getFullYear() })} required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="cruisingSpeedKnots">Cruising Speed (knots)</Label>
+                  <Input id="cruisingSpeedKnots" type="number" min="1" value={formData.cruisingSpeedKnots} onChange={(e) => setFormData({ ...formData, cruisingSpeedKnots: Number(e.target.value) || 1 })} required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="fuelBurn">Fuel Burn (litres/hour)</Label>
+                  <Input id="fuelBurn" type="number" min="0" value={formData.fuelBurnLitresPerHour} onChange={(e) => setFormData({ ...formData, fuelBurnLitresPerHour: Number(e.target.value) || 0 })} required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="departureMarina">Departure Marina</Label>
+                  <Input id="departureMarina" value={formData.departureMarina} onChange={(e) => setFormData({ ...formData, departureMarina: e.target.value })} placeholder="e.g., Limenas Marina" required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="mapQuery">Map Query</Label>
+                  <Input id="mapQuery" value={formData.mapQuery} onChange={(e) => setFormData({ ...formData, mapQuery: e.target.value })} placeholder="e.g., Limenas Marina, Thassos, Greece" required />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="cancellationPolicy">Cancellation Policy</Label>
+                  <Input id="cancellationPolicy" value={formData.cancellationPolicy} onChange={(e) => setFormData({ ...formData, cancellationPolicy: e.target.value })} required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="responseTime">Response Time</Label>
+                  <Input id="responseTime" value={formData.responseTime} onChange={(e) => setFormData({ ...formData, responseTime: e.target.value })} required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="minNoticeHours">Minimum Notice (hours)</Label>
+                  <Input id="minNoticeHours" type="number" min="0" value={formData.minNoticeHours} onChange={(e) => setFormData({ ...formData, minNoticeHours: Number(e.target.value) || 0 })} required />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="unavailableDates">Unavailable Dates (comma separated: YYYY-MM-DD)</Label>
+                  <Input id="unavailableDates" value={formData.unavailableDatesInput} onChange={(e) => setFormData({ ...formData, unavailableDatesInput: e.target.value })} placeholder="2026-04-01, 2026-04-03" />
+                </div>
+              </div>
+            )}
+
+            {currentStep === 3 && (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="image">Image URL (optional)</Label>
+                    <Input id="image" type="url" value={formData.image.startsWith("data:") ? "" : formData.image} onChange={(e) => setFormData({ ...formData, image: e.target.value })} placeholder="https://example.com/boat.jpg" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="image-file">Upload Image from Computer</Label>
+                    <Input id="image-file" type="file" accept="image/*" onChange={handleImageFileChange} />
+                  </div>
+                </div>
+
+                {(localImagePreview || formData.image) && (
+                  <div className="space-y-2">
+                    <Label>Image Preview</Label>
+                    <img src={localImagePreview || resolveStorageImage(formData.image, "boat-images", formData.image)} alt="Boat preview" className="h-44 w-full rounded-xl object-cover border border-border" />
+                  </div>
+                )}
+
+                <div className="rounded-xl border border-border p-4 bg-muted/30">
+                  <p className="text-sm text-muted-foreground">Estimated monthly revenue (12 booked days)</p>
+                  <p className="text-2xl font-semibold text-foreground mt-1">€{estimatedMonthlyRevenue.toLocaleString()}</p>
+                </div>
+
+                <div className="space-y-3">
+                  <Label>Boat Features</Label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {BOAT_FEATURE_OPTIONS.map((feature) => (
+                      <label key={feature} className="flex items-center gap-2 rounded-lg border border-border p-3 cursor-pointer hover:bg-muted/50">
+                        <Checkbox checked={features.includes(feature)} onCheckedChange={() => handleToggleFeature(feature)} />
+                        <span className="text-sm text-foreground">{feature}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {currentStep === 4 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-aegean" />
+                  <Label>Boat Documents &amp; Papers</Label>
+                </div>
+                <p className="text-xs text-muted-foreground">Upload registration, insurance, permits, licenses, etc. (PDF or images).</p>
+
+                <div className="flex flex-wrap gap-2">
+                  {DOCUMENT_LABELS.map((label, i) => (
+                    <button
+                      key={label}
+                      type="button"
+                      onClick={() => setDocLabelIndex(i)}
+                      className={`rounded-full border px-3 py-1 text-xs transition-colors ${docLabelIndex === i ? "border-aegean bg-aegean/10 text-foreground" : "border-border text-muted-foreground hover:border-aegean/40"}`}
+                    >
+                      {label}
+                    </button>
                   ))}
                 </div>
-              )}
-            </div>
 
-            <div className="flex gap-3 pt-4">
-              <Button type="button" variant="outline" onClick={onClose} className="flex-1">Cancel</Button>
-              <Button type="submit" className="flex-1 bg-gradient-accent text-accent-foreground" disabled={isSubmitting}>
-                {isSubmitting ? "Saving..." : isEdit ? "Save Changes" : "Add Boat"}
-              </Button>
+                <div className="rounded-xl border-2 border-dashed border-border p-6 text-center cursor-pointer hover:border-aegean/50 transition-colors" onClick={() => docInputRef.current?.click()}>
+                  <UploadCloud className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
+                  <p className="text-sm text-muted-foreground">Click to upload document</p>
+                  <p className="text-xs text-muted-foreground mt-1">PDF, JPG, PNG accepted. Files are stored in Supabase bucket boat-documents.</p>
+                </div>
+                <input ref={docInputRef} type="file" accept="application/pdf,image/*" multiple className="hidden" onChange={handleDocumentUpload} />
+
+                {documents.length > 0 && (
+                  <div className="space-y-2">
+                    {documents.map((doc, index) => (
+                      <div key={index} className="flex items-center gap-3 rounded-lg border border-border p-3">
+                        <FileText className="h-4 w-4 text-aegean shrink-0" />
+                        <Input value={doc.name} onChange={(e) => renameDocument(index, e.target.value)} className="flex-1 h-7 text-sm px-2" />
+                        {doc.fileType.startsWith("image/") ? (
+                          <a href={doc.dataUrl || doc.filePath} target="_blank" rel="noreferrer" className="text-xs text-aegean hover:underline shrink-0">View</a>
+                        ) : (
+                          <a href={doc.dataUrl || doc.filePath} download={doc.name} className="text-xs text-aegean hover:underline shrink-0">Download</a>
+                        )}
+                        <button type="button" onClick={() => removeDocument(index)} className="text-destructive hover:opacity-80 shrink-0">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+              {currentStep > 1 && (
+                <Button type="button" variant="outline" onClick={handlePrevStep}>Back</Button>
+              )}
+              {currentStep < FORM_STEPS.length ? (
+                <Button type="button" className="ml-auto bg-gradient-accent text-accent-foreground" onClick={handleNextStep} disabled={!validateStep(currentStep)}>
+                  Next Step
+                </Button>
+              ) : (
+                <Button type="submit" className="ml-auto bg-gradient-accent text-accent-foreground" disabled={isSubmitting}>
+                  {isSubmitting ? "Saving..." : isEdit ? "Save Changes" : "Add Boat"}
+                </Button>
+              )}
             </div>
           </form>
         </CardContent>

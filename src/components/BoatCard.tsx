@@ -1,6 +1,7 @@
-import { Star, Users, MapPin } from "lucide-react";
+import { Star, Users, MapPin, Heart } from "lucide-react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
+import { useFavorites } from "@/hooks/useFavorites";
 
 interface BoatCardProps {
   id?: string;
@@ -15,6 +16,8 @@ interface BoatCardProps {
 }
 
 const BoatCard = ({ id, image, name, capacity, location, pricePerDay, rating, index, reviewCount }: BoatCardProps) => {
+  const { isFavorite, toggleFavorite } = useFavorites();
+  const favorited = id ? isFavorite(id) : false;
   const cardContent = (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -34,6 +37,24 @@ const BoatCard = ({ id, image, name, capacity, location, pricePerDay, rating, in
           <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />
           <span className="text-xs font-semibold text-foreground">{rating}</span>
         </div>
+        {id && (
+          <button
+            type="button"
+            aria-label={favorited ? "Remove from favorites" : "Add to favorites"}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              toggleFavorite(id);
+            }}
+            className="absolute top-3 left-3 rounded-full bg-card/90 backdrop-blur-sm p-1.5 transition-colors hover:bg-card"
+          >
+            <Heart
+              className={`h-4 w-4 transition-colors ${
+                favorited ? "fill-rose-500 text-rose-500" : "text-muted-foreground"
+              }`}
+            />
+          </button>
+        )}
       </div>
       <div className="p-4">
         <h3 className="font-heading font-semibold text-foreground text-lg mb-1">{name}</h3>

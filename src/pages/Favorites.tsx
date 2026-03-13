@@ -1,0 +1,154 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { Heart } from "lucide-react";
+import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
+import { Button } from "@/components/ui/button";
+import { useFavorites } from "@/hooks/useFavorites";
+import { supabase } from "@/lib/supabase";
+import { resolveStorageImage } from "@/lib/storage-public";
+import { useLanguage } from "@/contexts/LanguageContext";
+
+type FavoriteBoat = {
+  id: string;
+  name: string;
+  location: string;
+  price_per_day: number;
+  images: string | null;
+  rating: number;
+};
+
+const Favorites = () => {
+  const { language, t } = useLanguage();
+  const { favoriteIds, toggleFavorite } = useFavorites();
+  const [boats, setBoats] = useState<FavoriteBoat[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // favoriteIds is an array; join to a stable key so the effect re-runs when it changes
+  const favKey = [...favoriteIds].sort().join(",");
+
+  useEffect(() => {
+    if (favoriteIds.length === 0) {
+      setBoats([]);
+      return;
+    }
+
+    let isMounted = true;
+    setLoading(true);
+
+    const fetchFavorites = async () => {
+      const { data } = await (supabase as any)
+        .from("boats")
+        .select("id, name, location, price_per_day, images, rating")
+        .in("id", favoriteIds);
+
+      if (isMounted) {
+        setBoats((data as FavoriteBoat[]) ?? []);
+        setLoading(false);
+      }
+    };
+
+    void fetchFavorites();
+
+    return () => {
+      isMounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [favKey]);
+
+  return (
+    <div className="min-h-screen bg-background">
+      <Navbar />
+
+      <main className="pt-24 pb-20">
+        <div className="container mx-auto px-4">
+          <div className="mb-8">
+            <div className="flex items-center gap-3 mb-2">
+              <Heart className="h-6 w-6 fill-rose-500 text-rose-500" />
+              <h1 className="text-3xl font-heading font-bold text-foreground">{t("favorites.title")}</h1>
+            </div>
+            <p className="text-muted-foreground">
+              {favoriteIds.length === 0
+                ? t("favorites.emptyHint")
+                : language === "el"
+                  ? t("favorites.count", {
+                      count: favoriteIds.length,
+                      suffix: favoriteIds.length === 1 ? "" : "η",
+                      suffix2: favoriteIds.length === 1 ? "ο" : "α",
+                    })
+                  : t("favorites.count", {
+                      count: favoriteIds.length,
+                      suffix: favoriteIds.length === 1 ? "" : "s",
+                    })}
+            </p>
+          </div>
+
+          {favoriteIds.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-24 gap-5 text-center">
+              <Heart className="h-16 w-16 text-muted-foreground/20" />
+              <p className="text-muted-foreground text-lg">{t("favorites.none")}</p>
+              <p className="text-sm text-muted-foreground max-w-xs">
+                {t("favorites.noneDesc")}
+              </p>
+              <Button asChild variant="outline" className="rounded-full">
+                <Link to="/boats">{t("favorites.browse")}</Link>
+              </Button>
+            </div>
+          ) : loading ? (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {favoriteIds.map((id) => (
+                <div key={id} className="rounded-2xl bg-muted animate-pulse aspect-[4/3]" />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {boats.map((boat) => (
+                <div
+                  key={boat.id}
+                  className="group bg-card rounded-2xl overflow-hidden shadow-card hover:shadow-card-hover transition-all duration-300"
+                >
+                  <div className="relative aspect-[4/3] overflow-hidden">
+                    <img
+                      src={resolveStorageImage(boat.images && !/\.\w{2,6}(\?|$)/.test(boat.images) ? `${boat.images}/1.jpg` : (boat.images ?? ""), "boat-images")}
+                      alt={boat.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      loading="lazy"
+                    />
+                    <button
+                      type="button"
+                      aria-label={t("favorites.remove")}
+                      onClick={() => toggleFavorite(boat.id)}
+                      className="absolute top-3 left-3 rounded-full bg-card/90 backdrop-blur-sm p-1.5 hover:bg-card transition-colors"
+                    >
+                      <Heart className="h-4 w-4 fill-rose-500 text-rose-500" />
+                    </button>
+                  </div>
+                  <div className="p-4">
+                    <h3 className="font-heading font-semibold text-foreground text-lg mb-1">{boat.name}</h3>
+                    <p className="text-sm text-muted-foreground mb-3">{boat.location}</p>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-lg font-heading font-bold text-foreground">€{boat.price_per_day}</span>
+                        <span className="text-sm text-muted-foreground"> / day</span>
+                      </div>
+                      <Link
+                        to={`/boats/${boat.id}`}
+                        className="text-sm font-medium text-aegean hover:text-turquoise transition-colors"
+                      >
+                        {t("favorites.viewBoat")}
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </main>
+
+      <Footer />
+    </div>
+  );
+};
+
+export default Favorites;

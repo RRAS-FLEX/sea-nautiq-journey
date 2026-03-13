@@ -42,6 +42,9 @@ export type Database = {
           price_per_day: number;
           rating: number;
           image: string;
+          images: string | null;
+          skipper_required: boolean | null;
+          documents_folder: string | null;
           image_url: string | null;
           stripe_link: string | null;
           status: "active" | "inactive" | "maintenance";
@@ -62,6 +65,9 @@ export type Database = {
           price_per_day: number;
           rating?: number;
           image?: string;
+          images?: string | null;
+          skipper_required?: boolean | null;
+          documents_folder?: string | null;
           image_url?: string | null;
           stripe_link?: string | null;
           status?: "active" | "inactive" | "maintenance";
@@ -82,6 +88,9 @@ export type Database = {
           price_per_day?: number;
           rating?: number;
           image?: string;
+          images?: string | null;
+          skipper_required?: boolean | null;
+          documents_folder?: string | null;
           image_url?: string | null;
           stripe_link?: string | null;
           status?: "active" | "inactive" | "maintenance";
@@ -219,6 +228,26 @@ export type Database = {
           comment?: string;
         };
       };
+      favorites: {
+        Row: {
+          id: string;
+          user_id: string;
+          boat_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          boat_id: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          boat_id?: string;
+          created_at?: string;
+        };
+      };
     };
     Views: {};
     Functions: {};
@@ -232,7 +261,6 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 let supabase: SupabaseClient<Database> | null = null;
 
 if (supabaseUrl && supabaseAnonKey) {
-  console.log("✅ Supabase configured successfully!");
   supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       persistSession: true,
@@ -260,6 +288,13 @@ if (supabaseUrl && supabaseAnonKey) {
       update: () => Promise.reject(new Error("Supabase not configured")),
       delete: () => Promise.reject(new Error("Supabase not configured")),
     }),
+    storage: {
+      from: () => ({
+        upload: () => Promise.reject(new Error("Supabase not configured")),
+        list: () => Promise.reject(new Error("Supabase not configured")),
+        createSignedUrl: () => Promise.reject(new Error("Supabase not configured")),
+      }),
+    },
   } as any;
 }
 

@@ -2,17 +2,27 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { getDestinations, type Destination } from "@/lib/destinations";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const Destinations = () => {
+  const { tl } = useLanguage();
   const [destinations, setDestinations] = useState<Destination[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
 
     const loadDestinations = async () => {
-      const nextDestinations = await getDestinations();
-      if (!cancelled) {
-        setDestinations(nextDestinations.filter((destination) => destination.boats > 0).slice(0, 4));
+      try {
+        const nextDestinations = await getDestinations();
+        if (!cancelled) {
+          const prioritized = nextDestinations.filter((destination) => destination.boats > 0);
+          setDestinations((prioritized.length > 0 ? prioritized : nextDestinations).slice(0, 4));
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
       }
     };
 
@@ -32,14 +42,20 @@ const Destinations = () => {
           viewport={{ once: true }}
           className="text-center mb-12"
         >
+          <p className="inline-flex items-center rounded-full border border-border bg-background/70 px-3 py-1 text-xs text-muted-foreground mb-4">
+            {tl("Island picks with real boat availability", "Επιλεγμένοι προορισμοί με πραγματική διαθεσιμότητα σκαφών")}
+          </p>
           <h2 className="text-3xl md:text-4xl font-heading font-bold text-foreground mb-3">
-            Popular Destinations
+            {tl("Popular Destinations", "Δημοφιλείς Προορισμοί")}
           </h2>
           <p className="text-muted-foreground text-lg max-w-md mx-auto">
-            Explore the most stunning coastlines of Greece.
+            {tl("Explore the most stunning coastlines of Greece.", "Ανακάλυψε τις πιο εντυπωσιακές ακτογραμμές της Ελλάδας.")}
           </p>
         </motion.div>
 
+        {isLoading ? (
+          <p className="text-center text-muted-foreground">{tl("Loading destinations…", "Φόρτωση προορισμών…")}</p>
+        ) : (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
           {destinations.map((dest, i) => (
             <Link key={dest.id} to={`/destinations#${dest.slug}`}>
@@ -61,12 +77,15 @@ const Destinations = () => {
                 <h3 className="text-xl font-heading font-bold text-primary-foreground">
                   {dest.name}
                 </h3>
-                <p className="text-sm text-primary-foreground/70">{dest.boats} boats available</p>
+                <p className="text-sm text-primary-foreground/70">{dest.boats} {tl("boats available", "διαθέσιμα σκάφη")}</p>
+                <p className="text-xs text-primary-foreground/80 mt-2 line-clamp-2">{dest.description}</p>
+                <p className="text-[11px] text-primary-foreground/80 mt-1">{tl("Best for", "Ιδανικό για")}: {dest.bestFor}</p>
               </div>
             </motion.div>
             </Link>
           ))}
         </div>
+        )}
       </div>
     </section>
   );

@@ -16,11 +16,24 @@ type BoatCardProps = {
 };
 
 function BoatCard({ boat }: BoatCardProps) {
-  const isAvailable = Boolean(boat.stripe_link);
+  const isTrustedStripeLink = (value: string) => {
+    try {
+      const url = new URL(value);
+      return ["https:"].includes(url.protocol) && ["checkout.stripe.com", "buy.stripe.com"].includes(url.hostname);
+    } catch {
+      return false;
+    }
+  };
+
+  const isAvailable = Boolean(boat.stripe_link && isTrustedStripeLink(boat.stripe_link));
   const priceLabel = typeof boat.price === "number" ? boat.price.toLocaleString() : "Contact for price";
 
   const handleBookNow = () => {
     if (!boat.stripe_link) {
+      return;
+    }
+
+    if (!isTrustedStripeLink(boat.stripe_link)) {
       return;
     }
 

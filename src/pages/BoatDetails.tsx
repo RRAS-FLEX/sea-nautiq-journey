@@ -16,15 +16,19 @@ import type { Boat } from "@/lib/boats";
 import { getBoatReviews, getBoatReviewStats } from "@/lib/reviews";
 import { trackBoatViewed, trackBookingStarted } from "@/lib/analytics";
 import { toOwnerSlug } from "@/lib/owners";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const BoatDetails = () => {
+  const { tl } = useLanguage();
   const { boatId } = useParams<{ boatId: string }>();
   const [boat, setBoat] = useState<Boat | null>(null);
+  const [selectedImage, setSelectedImage] = useState(0);
   const bookingRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!boatId) return;
     setBoat(null);
+    setSelectedImage(0);
     getBoatById(boatId).then(setBoat);
   }, [boatId]);
 
@@ -65,7 +69,7 @@ const BoatDetails = () => {
       "@context": "https://schema.org",
       "@type": "Product",
       name: boat.name,
-      image: [boat.image],
+      image: boat.images.length > 0 ? boat.images : [boat.image],
       description: boat.description,
       brand: {
         "@type": "Brand",
@@ -149,9 +153,9 @@ const BoatDetails = () => {
         <Navbar />
         <main className="pt-24 pb-20">
           <div className="container mx-auto px-4 text-center space-y-4">
-            <h1 className="text-3xl font-heading font-bold text-foreground">Boat not found</h1>
-            <p className="text-muted-foreground">This boat may have been removed or the link is incorrect.</p>
-            <Link to="/boats" className="text-aegean hover:text-turquoise font-medium">Back to boats →</Link>
+            <h1 className="text-3xl font-heading font-bold text-foreground">{tl("Boat not found", "Το σκάφος δεν βρέθηκε")}</h1>
+            <p className="text-muted-foreground">{tl("This boat may have been removed or the link is incorrect.", "Αυτό το σκάφος μπορεί να έχει αφαιρεθεί ή ο σύνδεσμος να είναι λανθασμένος.")}</p>
+            <Link to="/boats" className="text-aegean hover:text-turquoise font-medium">{tl("Back to boats →", "Επιστροφή στα σκάφη →")}</Link>
           </div>
         </main>
         <Footer />
@@ -168,17 +172,17 @@ const BoatDetails = () => {
         onClick={scrollToBooking}
         className="fixed bottom-4 left-4 right-4 md:hidden z-40 py-3 px-4 bg-gradient-accent text-accent-foreground font-semibold rounded-xl shadow-lg hover:opacity-90 transition-opacity"
       >
-        Book Now
+        {tl("Book Now", "Κράτηση τώρα")}
       </button>
 
       <main className="pt-16 pb-20 md:pb-0">
         <section className="py-8 md:py-10 border-b border-border">
           <div className="container mx-auto px-4 flex items-center justify-between gap-4">
             <div>
-              <p className="text-sm text-muted-foreground">Boat details</p>
+              <p className="text-sm text-muted-foreground">{tl("Boat details", "Λεπτομέρειες σκάφους")}</p>
               <h1 className="text-3xl md:text-4xl font-heading font-bold text-foreground">{boat.name}</h1>
             </div>
-            <Link to="/boats" className="text-sm font-medium text-aegean hover:text-turquoise">← Back to all boats</Link>
+            <Link to="/boats" className="text-sm font-medium text-aegean hover:text-turquoise">← {tl("Back to all boats", "Επιστροφή σε όλα τα σκάφη")}</Link>
           </div>
         </section>
 
@@ -186,18 +190,34 @@ const BoatDetails = () => {
           <div className="container mx-auto px-4 grid grid-cols-1 lg:grid-cols-3 gap-6">
             <Card className="lg:col-span-2 overflow-hidden shadow-card-hover">
               <div className="aspect-[16/9] overflow-hidden">
-                <img src={boat.image} alt={boat.name} className="w-full h-full object-cover" />
+                <img src={boat.images[selectedImage] ?? boat.image} alt={boat.name} className="w-full h-full object-cover" />
               </div>
               <CardContent className="pt-6 space-y-6">
+                {boat.images.length > 1 ? (
+                  <div className="grid grid-cols-4 gap-3 md:grid-cols-5">
+                    {boat.images.map((imageUrl, index) => (
+                      <button
+                        key={`${boat.id}-image-${index}`}
+                        type="button"
+                        onClick={() => setSelectedImage(index)}
+                        className={`overflow-hidden rounded-2xl border ${selectedImage === index ? "border-aegean" : "border-border"}`}
+                      >
+                        <img src={imageUrl} alt={`${boat.name} view ${index + 1}`} className="h-20 w-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge className="bg-gradient-accent text-accent-foreground">{boat.type}</Badge>
                   <Badge variant="outline" className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{boat.location}</Badge>
-                  <Badge variant="outline" className="flex items-center gap-1"><Users className="h-3.5 w-3.5" />{boat.capacity} guests</Badge>
+                  <Badge variant="outline" className="flex items-center gap-1"><Users className="h-3.5 w-3.5" />{boat.capacity} {tl("guests", "επισκέπτες")}</Badge>
                   <Badge variant="outline" className="flex items-center gap-1"><Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />{boat.rating}</Badge>
+                  {boat.skipperRequired ? <Badge variant="outline">{tl("Skipper required", "Απαιτείται skipper")}</Badge> : null}
                 </div>
 
                 <div className="rounded-3xl border border-border bg-muted/20 p-5 space-y-4">
-                  <h2 className="font-heading font-semibold text-lg text-foreground">Overview</h2>
+                  <h2 className="font-heading font-semibold text-lg text-foreground">{tl("Overview", "Επισκόπηση")}</h2>
                   <p className="text-muted-foreground leading-relaxed">{boat.description}</p>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="rounded-2xl border border-border bg-background p-4">
@@ -220,7 +240,7 @@ const BoatDetails = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <h2 className="font-heading font-semibold text-lg">Included amenities</h2>
+                  <h2 className="font-heading font-semibold text-lg">{tl("Included amenities", "Παροχές που περιλαμβάνονται")}</h2>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {boat.amenities.map((amenity) => (
                       <div key={amenity} className="text-sm text-foreground flex items-center gap-2">
@@ -233,12 +253,12 @@ const BoatDetails = () => {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="rounded-2xl border border-border p-4">
-                    <p className="text-sm text-muted-foreground">Departure marina</p>
+                    <p className="text-sm text-muted-foreground">{tl("Departure marina", "Μαρίνα αναχώρησης")}</p>
                     <p className="font-medium text-foreground">{boat.departureMarina}</p>
                     <p className="text-xs text-muted-foreground mt-1">{boat.responseTime}</p>
                   </div>
                   <div className="rounded-2xl border border-border p-4">
-                    <p className="text-sm text-muted-foreground flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-aegean" />Booking policy</p>
+                    <p className="text-sm text-muted-foreground flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-aegean" />{tl("Booking policy", "Πολιτική κράτησης")}</p>
                     <p className="font-medium text-foreground">{boat.cancellationPolicy}</p>
                   </div>
                 </div>
@@ -257,8 +277,8 @@ const BoatDetails = () => {
                       </Avatar>
                       <div className="space-y-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="font-heading text-lg font-semibold text-foreground">Hosted by {boat.owner.name}</h2>
-                          {boat.owner.isSuperhost ? <Badge className="bg-aegean text-primary-foreground">Guest favorite</Badge> : null}
+                          <h2 className="font-heading text-lg font-semibold text-foreground">{tl("Hosted by", "Οικοδεσπότης")} {boat.owner.name}</h2>
+                          {boat.owner.isSuperhost ? <Badge className="bg-aegean text-primary-foreground">{tl("Guest favorite", "Αγαπημένο των επισκεπτών")}</Badge> : null}
                         </div>
                         <p className="text-sm text-muted-foreground">{boat.owner.title} since {boat.owner.joinedYear}</p>
                       </div>
@@ -290,7 +310,7 @@ const BoatDetails = () => {
                   <div className="rounded-3xl border border-border bg-muted/20 p-5 space-y-4">
                     <div className="flex items-center gap-2">
                       <CalendarDays className="h-5 w-5 text-aegean" />
-                      <h2 className="font-heading text-lg font-semibold text-foreground">Availability check</h2>
+                      <h2 className="font-heading text-lg font-semibold text-foreground">{tl("Availability check", "Έλεγχος διαθεσιμότητας")}</h2>
                     </div>
                     <Calendar
                       mode="single"
@@ -306,7 +326,7 @@ const BoatDetails = () => {
                       ))}
                     </div>
                     <p className="text-sm text-muted-foreground">
-                      Next open day: <span className="font-medium text-foreground">{nextAvailableDate ? format(nextAvailableDate, "EEEE, d MMM") : "Check with owner"}</span>
+                      {tl("Next open day:", "Επόμενη διαθέσιμη ημέρα:")} <span className="font-medium text-foreground">{nextAvailableDate ? format(nextAvailableDate, "EEEE, d MMM") : tl("Check with owner", "Επικοινώνησε με τον ιδιοκτήτη")}</span>
                     </p>
                     <p className="text-xs text-muted-foreground">Minimum notice: {boat.availability.minNoticeHours} hours before departure.</p>
                   </div>
@@ -325,7 +345,7 @@ const BoatDetails = () => {
                     </div>
                     <div className="p-5 space-y-4">
                       <div>
-                        <p className="text-sm text-muted-foreground">Pickup point</p>
+                        <p className="text-sm text-muted-foreground">{tl("Pickup point", "Σημείο παραλαβής")}</p>
                         <h2 className="font-heading text-lg font-semibold text-foreground">{boat.departureMarina}</h2>
                         <p className="text-sm text-muted-foreground mt-1">{boat.location}, Greece</p>
                       </div>
@@ -336,13 +356,13 @@ const BoatDetails = () => {
                         <Button asChild className="bg-gradient-accent text-accent-foreground">
                           <a href={googleDirectionsUrl} target="_blank" rel="noreferrer">
                             <Navigation className="mr-2 h-4 w-4" />
-                            Navigate in Google Maps
+                            {tl("Navigate in Google Maps", "Πλοήγηση στο Google Maps")}
                           </a>
                         </Button>
                         <Button asChild variant="outline">
                           <a href={googleMapsUrl} target="_blank" rel="noreferrer">
                             <MapPin className="mr-2 h-4 w-4" />
-                            Open marina map
+                            {tl("Open marina map", "Άνοιγμα χάρτη μαρίνας")}
                           </a>
                         </Button>
                       </div>
@@ -357,27 +377,27 @@ const BoatDetails = () => {
             <div className="flex flex-col gap-6">
               <Card className="shadow-card" ref={bookingRef}>
                 <CardHeader>
-                  <CardTitle>Booking summary</CardTitle>
+                  <CardTitle>{tl("Booking summary", "Σύνοψη κράτησης")}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-end justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">Starting from</p>
+                      <p className="text-sm text-muted-foreground">{tl("Starting from", "Από")}</p>
                       <p className="text-3xl font-heading font-bold text-foreground">€{boat.pricePerDay}</p>
                     </div>
-                    <p className="text-sm text-muted-foreground">per day</p>
+                    <p className="text-sm text-muted-foreground">{tl("per day", "ανά ημέρα")}</p>
                   </div>
                   <Button asChild className="w-full bg-gradient-accent text-accent-foreground">
                     <Link
                       to={`/booking?boatId=${encodeURIComponent(boat.id)}&boat=${encodeURIComponent(boat.name)}`}
                       onClick={() => trackBookingStarted({ boatId: boat.id, boatName: boat.name, source: "boat_details" })}
                     >
-                      Request Booking
+                      {tl("Request Booking", "Αίτημα Κράτησης")}
                     </Link>
                   </Button>
                   <Button asChild variant="outline" className="w-full">
                     <Link to={`/chat?boatId=${encodeURIComponent(boat.id)}&boat=${encodeURIComponent(boat.name)}`}>
-                      <MessageCircle className="mr-2 h-4 w-4" />Chat with owner
+                      <MessageCircle className="mr-2 h-4 w-4" />{tl("Chat with owner", "Συνομιλία με ιδιοκτήτη")}
                     </Link>
                   </Button>
                 </CardContent>
@@ -386,7 +406,7 @@ const BoatDetails = () => {
               <Card className="shadow-card">
                 <CardHeader>
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <CardTitle>Guest reviews</CardTitle>
+                    <CardTitle>{tl("Guest reviews", "Αξιολογήσεις επισκεπτών")}</CardTitle>
                     <Badge variant="outline" className="flex items-center gap-1">
                       <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
                       {reviewStats.averageRating ? reviewStats.averageRating.toFixed(1) : boat.rating} ({reviewStats.total})
@@ -407,7 +427,7 @@ const BoatDetails = () => {
                       ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">No reviews yet for this boat.</p>
+                    <p className="text-sm text-muted-foreground">{tl("No reviews yet for this boat.", "Δεν υπάρχουν ακόμη αξιολογήσεις για αυτό το σκάφος.")}</p>
                   )}
                 </CardContent>
               </Card>

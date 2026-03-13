@@ -31,5 +31,26 @@ export const calculateBoatPromotionScore = (boat: Boat): number => {
   );
 };
 
-  export const sortBoatsByPromotionScore = (items: Boat[]): Boat[] =>
-    [...items].sort((a, b) => calculateBoatPromotionScore(b) - calculateBoatPromotionScore(a));
+export const sortBoatsByPromotionScore = (items: Boat[]): Boat[] =>
+  [...items].sort((a, b) => calculateBoatPromotionScore(b) - calculateBoatPromotionScore(a));
+
+export const calculateBoatDemandScore = (boat: Boat): number => {
+  const bookingsScore = clamp(boat.bookings, 0, 10000) * 55;
+  const revenueScore = clamp(boat.revenue, 0, 10_000_000) * 0.05;
+  const ratingScore = clamp(boat.rating, 0, 5) * 35;
+  const hostResponseScore = clamp(boat.owner.responseRate, 0, 100) * 0.2;
+  return Number((bookingsScore + revenueScore + ratingScore + hostResponseScore).toFixed(2));
+};
+
+export const sortBoatsByBookingsFirst = (items: Boat[]): Boat[] =>
+  [...items].sort((a, b) => {
+    if (b.bookings !== a.bookings) {
+      return b.bookings - a.bookings;
+    }
+
+    if (b.revenue !== a.revenue) {
+      return b.revenue - a.revenue;
+    }
+
+    return calculateBoatDemandScore(b) - calculateBoatDemandScore(a);
+  });

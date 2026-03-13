@@ -19,6 +19,7 @@ import {
 import { getBoatById } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const OwnerAvatar = ({ ownerName, size = "sm" }: { ownerName: string; size?: "sm" | "lg" }) => {
   const initials = ownerName
@@ -99,6 +100,7 @@ const TypingIndicator = ({ ownerName }: { ownerName: string }) => (
 );
 
 const Chat = () => {
+  const { tl } = useLanguage();
   const [searchParams] = useSearchParams();
   const { user: sessionUser } = useCurrentUser();
   const customerName = sessionUser?.name ?? "You";
@@ -191,17 +193,17 @@ const Chat = () => {
                 <div className="flex items-center gap-2">
                   <p className="font-semibold text-foreground truncate">{ownerName}</p>
                   {boat?.owner.isSuperhost && (
-                    <Badge className="bg-aegean text-primary-foreground shrink-0">Guest favorite</Badge>
+                    <Badge className="bg-aegean text-primary-foreground shrink-0">{tl("Guest favorite", "Αγαπημένο των επισκεπτών")}</Badge>
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground truncate">
-                  {boat?.owner.title ?? "Boat owner"} · {boat?.responseTime ?? "Usually responds fast"}
+                  {boat?.owner.title ?? tl("Boat owner", "Ιδιοκτήτης σκάφους")} · {boat?.responseTime ?? tl("Usually responds fast", "Συνήθως απαντά γρήγορα")}
                 </p>
               </div>
             </div>
             <div className="shrink-0 flex items-center gap-1.5 text-xs text-emerald-500">
               <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-              Online
+              {tl("Online", "Online")}
             </div>
           </div>
         </div>
@@ -212,11 +214,11 @@ const Chat = () => {
             {!sessionUser ? (
               <div className="h-full flex flex-col items-center justify-center gap-3 py-16 text-center">
                 <p className="font-semibold text-foreground">Sign in to start chatting</p>
-                <p className="text-sm text-muted-foreground max-w-xs">Owner conversations now use your Supabase account instead of browser-only storage.</p>
+                <p className="text-sm text-muted-foreground max-w-xs">{tl("Owner conversations now use your Supabase account instead of browser-only storage.", "Οι συνομιλίες με ιδιοκτήτες χρησιμοποιούν τώρα τον λογαριασμό Supabase αντί για τοπική αποθήκευση browser.")}</p>
               </div>
             ) : errorMessage ? (
               <div className="h-full flex flex-col items-center justify-center gap-3 py-16 text-center">
-                <p className="font-semibold text-foreground">Unable to load chat</p>
+                <p className="font-semibold text-foreground">{tl("Unable to load chat", "Αδυναμία φόρτωσης συνομιλίας")}</p>
                 <p className="text-sm text-muted-foreground max-w-xs">{errorMessage}</p>
               </div>
             ) : !thread || thread.messages.length === 0 ? (
@@ -226,7 +228,7 @@ const Chat = () => {
                 </div>
                 <p className="font-semibold text-foreground">Start a conversation</p>
                 <p className="text-sm text-muted-foreground max-w-xs">
-                  Ask {ownerName} about availability, stops, routes, or anything about {boatName}.
+                  {tl("Ask", "Ρώτησε")} {ownerName} {tl("about availability, stops, routes, or anything about", "για διαθεσιμότητα, στάσεις, διαδρομές ή οτιδήποτε σχετικά με")} {boatName}.
                 </p>
                 <div className="flex flex-wrap justify-center gap-2 mt-2">
                   {[
@@ -266,7 +268,7 @@ const Chat = () => {
             <CustomerAvatar name={customerName} />
             <Input
               className="flex-1 border-0 bg-transparent shadow-none focus-visible:ring-0 text-sm placeholder:text-muted-foreground"
-              placeholder={`Message ${ownerName}…`}
+              placeholder={`${tl("Message", "Μήνυμα προς")} ${ownerName}…`}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -284,7 +286,7 @@ const Chat = () => {
           </div>
 
           <p className="text-center text-xs text-muted-foreground">
-            Messages are stored in Supabase · {boat?.owner.responseRate ?? 97}% response rate
+            {tl("Messages are stored in Supabase", "Τα μηνύματα αποθηκεύονται στο Supabase")} · {boat?.owner.responseRate ?? 97}% {tl("response rate", "ποσοστό απόκρισης")}
           </p>
         </div>
       </main>

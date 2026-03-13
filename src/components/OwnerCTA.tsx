@@ -1,14 +1,17 @@
 import { Anchor, TrendingUp, Calendar, Globe } from "lucide-react";
 import { motion } from "framer-motion";
+import { Link } from "react-router-dom";
 import { Button } from "./ui/button";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const benefits = [
-  { icon: Globe, text: "Reach tourists before they arrive" },
-  { icon: TrendingUp, text: "Receive online bookings & deposits" },
-  { icon: Calendar, text: "Manage your calendar easily" },
+  { icon: Globe, key: "ownerCta.benefit1" },
+  { icon: TrendingUp, key: "ownerCta.benefit2" },
+  { icon: Calendar, key: "ownerCta.benefit3" },
 ];
 
 const OwnerCTA = () => {
+  const { t } = useLanguage();
   return (
     <section className="py-20 md:py-28 bg-gradient-ocean relative overflow-hidden">
       {/* Decorative circles */}
@@ -26,30 +29,36 @@ const OwnerCTA = () => {
               <Anchor className="h-7 w-7 text-turquoise" />
             </div>
             <h2 className="text-3xl md:text-4xl font-heading font-bold text-primary-foreground mb-4">
-              Own a Boat? Start earning with Nautiq.
+              {t("ownerCta.title")}
             </h2>
             <p className="text-primary-foreground/70 text-lg mb-8">
-              Join hundreds of boat owners already earning with Nautiq across Greek islands.
+              {t("ownerCta.subtitle")}
             </p>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-10">
               {benefits.map((b) => (
                 <div
-                  key={b.text}
+                  key={b.key}
                   className="flex items-center gap-2 text-primary-foreground/80 text-sm"
                 >
                   <b.icon className="h-4 w-4 text-turquoise" />
-                  {b.text}
+                  {t(b.key)}
                 </div>
               ))}
             </div>
 
-            <Button
-              size="lg"
-              className="bg-turquoise text-accent-foreground rounded-full px-8 text-base font-semibold hover:bg-turquoise/90"
-            >
-              List Your Boat
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <Button
+                asChild
+                size="lg"
+                className="bg-turquoise text-accent-foreground rounded-full px-8 text-base font-semibold hover:bg-turquoise/90"
+              >
+                <Link to="/become-owner">{t("ownerCta.cta")}</Link>
+              </Button>
+              <Button asChild size="lg" variant="outline" className="rounded-full px-8 text-base border-primary-foreground/30 text-primary-foreground bg-transparent hover:bg-primary-foreground/10">
+                <Link to="/about">{t("nav.helpSupport")}</Link>
+              </Button>
+            </div>
           </motion.div>
         </div>
       </div>

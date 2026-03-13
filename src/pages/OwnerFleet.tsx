@@ -10,8 +10,10 @@ import { Card, CardContent } from "@/components/ui/card";
 import { getBoatReviewStats } from "@/lib/reviews";
 import { getOwnerFleetBySlug } from "@/lib/owners";
 import type { Boat, BoatOwner } from "@/lib/boats";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const OwnerFleet = () => {
+  const { tl } = useLanguage();
   const { ownerSlug } = useParams<{ ownerSlug: string }>();
   const [ownerName, setOwnerName] = useState("");
   const [owner, setOwner] = useState<BoatOwner | undefined>(undefined);
@@ -56,9 +58,9 @@ const OwnerFleet = () => {
         <Navbar />
         <main className="pt-24 pb-16">
           <div className="container mx-auto px-4 text-center space-y-3">
-            <h1 className="text-3xl font-heading font-bold text-foreground">Owner not found</h1>
-            <p className="text-muted-foreground">The requested owner fleet is not available.</p>
-            <Link to="/boats" className="text-aegean hover:text-turquoise">Back to boats</Link>
+            <h1 className="text-3xl font-heading font-bold text-foreground">{tl("Owner not found", "Ο ιδιοκτήτης δεν βρέθηκε")}</h1>
+            <p className="text-muted-foreground">{tl("The requested owner fleet is not available.", "Ο ζητούμενος στόλος ιδιοκτήτη δεν είναι διαθέσιμος.")}</p>
+            <Link to="/boats" className="text-aegean hover:text-turquoise">{tl("Back to boats", "Επιστροφή στα σκάφη")}</Link>
           </div>
         </main>
         <Footer />
@@ -81,11 +83,12 @@ const OwnerFleet = () => {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm text-muted-foreground">Owner fleet</p>
+                <p className="text-sm text-muted-foreground">{tl("Owner fleet", "Στόλος ιδιοκτήτη")}</p>
                 <h1 className="text-4xl font-heading font-bold text-foreground mt-2">{ownerName}</h1>
                 <p className="text-muted-foreground mt-2 max-w-2xl">{owner.bio}</p>
               </div>
               <Button asChild variant="outline">
-                <Link to="/boats">Browse all boats</Link>
+                <Link to="/boats">{tl("Browse all boats", "Περιήγηση σε όλα τα σκάφη")}</Link>
               </Button>
             </div>
 

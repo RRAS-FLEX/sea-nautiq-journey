@@ -9,8 +9,10 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { addBusinessTicket, getBusinessTicketMetrics, listBusinessTickets, type BusinessTicket } from "@/lib/business-tickets";
 import { useToast } from "@/hooks/use-toast";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const BusinessPromotions = () => {
+  const { tl } = useLanguage();
   const { toast } = useToast();
 
   const [businessName, setBusinessName] = useState("");
@@ -35,7 +37,7 @@ const BusinessPromotions = () => {
     if (!businessName.trim() || !contactName.trim() || !contactEmail.trim() || !message.trim()) {
       toast({
         title: "Missing ticket details",
-        description: "Fill all fields to send a business promotion ticket.",
+        description: tl("Fill all fields to send a business promotion ticket.", "Συμπλήρωσε όλα τα πεδία για να στείλεις αίτημα προώθησης επιχείρησης."),
         variant: "destructive",
       });
       return;
@@ -64,7 +66,7 @@ const BusinessPromotions = () => {
 
     toast({
       title: "Ticket received",
-      description: "Your promotion request is now in the business queue.",
+      description: tl("Your promotion request is now in the business queue.", "Το αίτημα προώθησης καταχωρήθηκε στην ουρά επιχειρήσεων."),
     });
   };
 
@@ -76,9 +78,9 @@ const BusinessPromotions = () => {
         <section className="py-14 border-b border-border bg-gradient-ocean">
           <div className="container mx-auto px-4">
             <p className="text-primary-foreground/80 text-sm">Business promotions</p>
-            <h1 className="text-3xl md:text-4xl font-heading font-bold text-primary-foreground mt-2">Hotel & partner ticket receiver</h1>
+            <h1 className="text-3xl md:text-4xl font-heading font-bold text-primary-foreground mt-2">{tl("Hotel & partner ticket receiver", "Διαχείριση αιτημάτων ξενοδοχείων & συνεργατών")}</h1>
             <p className="text-primary-foreground/70 max-w-2xl mt-3">
-              Capture promotional requests from hotels and travel businesses, then track estimated booking impact.
+              {tl("Capture promotional requests from hotels and travel businesses, then track estimated booking impact.", "Καταχώρισε αιτήματα προώθησης από ξενοδοχεία και τουριστικές επιχειρήσεις και παρακολούθησε τον εκτιμώμενο αντίκτυπο στις κρατήσεις.")}
             </p>
           </div>
         </section>
@@ -87,7 +89,7 @@ const BusinessPromotions = () => {
           <div className="container mx-auto px-4 grid grid-cols-1 lg:grid-cols-3 gap-6">
             <Card className="lg:col-span-2 shadow-card">
               <CardHeader>
-                <CardTitle>Create business ticket</CardTitle>
+                <CardTitle>{tl("Create business ticket", "Δημιουργία επιχειρηματικού αιτήματος")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -108,7 +110,7 @@ const BusinessPromotions = () => {
                   </select>
                 </div>
                 <Textarea placeholder="Promotion request details" value={message} onChange={(event) => setMessage(event.target.value)} />
-                <Button className="bg-gradient-accent text-accent-foreground" onClick={submitTicket}>Submit ticket</Button>
+                <Button className="bg-gradient-accent text-accent-foreground" onClick={submitTicket}>{tl("Submit ticket", "Υποβολή αιτήματος")}</Button>
               </CardContent>
             </Card>
 
@@ -125,11 +127,11 @@ const BusinessPromotions = () => {
           <div className="container mx-auto px-4">
             <Card>
               <CardHeader>
-                <CardTitle>Incoming tickets</CardTitle>
+                <CardTitle>{tl("Incoming tickets", "Εισερχόμενα αιτήματα")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 {tickets.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No tickets yet.</p>
+                  <p className="text-sm text-muted-foreground">{tl("No tickets yet.", "Δεν υπάρχουν αιτήματα ακόμη.")}</p>
                 ) : (
                   tickets.slice(0, 8).map((ticket) => (
                     <div key={ticket.id} className="rounded-xl border border-border p-4">

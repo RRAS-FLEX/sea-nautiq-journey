@@ -1,18 +1,21 @@
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 export default function PrivacyPolicy() {
+  const { tl } = useLanguage();
+
   return (
     <div className="min-h-screen bg-gradient-ocean py-4 sm:py-12">
       <div className="container mx-auto px-4 sm:px-6 lg:px-8 max-w-4xl">
         <Link to="/">
-          <Button variant="outline" className="mb-6">← Back to Home</Button>
+          <Button variant="outline" className="mb-6">← {tl('Back to Home', 'Επιστροφή στην αρχική')}</Button>
         </Link>
 
         <div className="bg-white rounded-xl shadow-card p-6 sm:p-8 space-y-6">
           <div>
-            <h1 className="text-3xl sm:text-4xl font-bold text-ocean mb-2">Privacy Policy</h1>
-            <p className="text-sm text-gray-500">Last updated: March 2026</p>
+            <h1 className="text-3xl sm:text-4xl font-bold text-ocean mb-2">{tl('Privacy Policy', 'Πολιτική Απορρήτου')}</h1>
+            <p className="text-sm text-gray-500">{tl('Last updated: March 2026', 'Τελευταία ενημέρωση: Μάρτιος 2026')}</p>
           </div>
 
           <section className="space-y-4">

@@ -16,9 +16,10 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getBoats } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
-import { sortBoatsByPromotionScore } from "@/lib/boat-ranking";
+import { sortBoatsByBookingsFirst } from "@/lib/boat-ranking";
 import { getBoatReviewStats } from "@/lib/reviews";
 import { toOwnerSlug } from "@/lib/owners";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const featuredCollections = [
   { title: "Family Friendly", subtitle: "8+ guests", location: "", minCapacity: "8", boatType: "any", minRating: "any" },
@@ -29,6 +30,7 @@ const featuredCollections = [
 const popularLocations = ["Thassos", "Halkidiki", "Mykonos", "Santorini"];
 
 const Boats = () => {
+  const { tl } = useLanguage();
   const [searchParams] = useSearchParams();
   const [locationQuery, setLocationQuery] = useState(searchParams.get("location") ?? "");
 
@@ -93,7 +95,7 @@ const Boats = () => {
       return [...visibleBoats].sort((a, b) => b.pricePerDay - a.pricePerDay);
     }
 
-    return sortBoatsByPromotionScore(visibleBoats);
+    return sortBoatsByBookingsFirst(visibleBoats);
   }, [allBoats, locationQuery, minCapacity, maxPrice, minLength, priceSort, boatType, minRating]);
   const filteredBoatIdsKey = filteredBoats.map((boat) => boat.id).join("|");
 
@@ -157,10 +159,10 @@ const Boats = () => {
           <div className="container mx-auto px-4">
             <p className="text-primary-foreground/80 text-sm mb-3">Explore our fleet</p>
             <h1 className="text-4xl md:text-5xl font-heading font-bold text-primary-foreground mb-4">
-              Find the right boat for your next sea trip
+              {tl("Find the right boat for your next sea trip", "Βρες το κατάλληλο σκάφος για την επόμενη θαλάσσια εκδρομή σου")}
             </h1>
             <p className="text-primary-foreground/70 max-w-2xl">
-              Compare verified boats by island, capacity, and price to book faster.
+              {tl("Compare verified boats by island, capacity, and price to book faster.", "Σύγκρινε επαληθευμένα σκάφη ανά νησί, χωρητικότητα και τιμή για πιο γρήγορη κράτηση.")}
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-8">
@@ -184,7 +186,7 @@ const Boats = () => {
               <CardHeader className="pb-4">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Filter className="h-5 w-5 text-aegean" />
-                  Filter Boats
+                  {tl("Filter Boats", "Φίλτρα Σκαφών")}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -206,7 +208,7 @@ const Boats = () => {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <p className="text-sm text-muted-foreground">Location</p>
+                  <p className="text-sm text-muted-foreground">{tl("Location", "Τοποθεσία")}</p>
                   <Input
                     value={locationQuery}
                     onChange={(event) => setLocationQuery(event.target.value)}
@@ -214,7 +216,7 @@ const Boats = () => {
                   />
                 </div>
                 <div className="space-y-2">
-                  <p className="text-sm text-muted-foreground">Minimum Capacity</p>
+                  <p className="text-sm text-muted-foreground">{tl("Minimum Capacity", "Ελάχιστη Χωρητικότητα")}</p>
                   <Select value={minCapacity} onValueChange={setMinCapacity}>
                     <SelectTrigger>
                       <SelectValue placeholder="Any size" />
@@ -228,7 +230,7 @@ const Boats = () => {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-sm text-muted-foreground">Maximum Price</p>
+                  <p className="text-sm text-muted-foreground">{tl("Maximum Price", "Μέγιστη Τιμή")}</p>
                   <Select value={maxPrice} onValueChange={setMaxPrice}>
                     <SelectTrigger>
                       <SelectValue placeholder="Any price" />
@@ -245,7 +247,7 @@ const Boats = () => {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <p className="text-sm text-muted-foreground">Minimum Length</p>
+                  <p className="text-sm text-muted-foreground">{tl("Minimum Length", "Ελάχιστο Μήκος")}</p>
                   <Select value={minLength} onValueChange={setMinLength}>
                     <SelectTrigger>
                       <SelectValue placeholder="Any length" />
@@ -259,7 +261,7 @@ const Boats = () => {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-sm text-muted-foreground">Boat Type</p>
+                  <p className="text-sm text-muted-foreground">{tl("Boat Type", "Τύπος Σκάφους")}</p>
                   <Select value={boatType} onValueChange={setBoatType}>
                     <SelectTrigger>
                       <SelectValue placeholder="Any type" />
@@ -274,7 +276,7 @@ const Boats = () => {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-sm text-muted-foreground">Minimum Rating</p>
+                  <p className="text-sm text-muted-foreground">{tl("Minimum Rating", "Ελάχιστη Βαθμολογία")}</p>
                   <Select value={minRating} onValueChange={setMinRating}>
                     <SelectTrigger>
                       <SelectValue placeholder="Any rating" />
@@ -288,7 +290,7 @@ const Boats = () => {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-sm text-muted-foreground">Sort</p>
+                  <p className="text-sm text-muted-foreground">{tl("Sort", "Ταξινόμηση")}</p>
                   <Select
                     value={priceSort}
                     onValueChange={(value) => setPriceSort(value as "recommended" | "price-low" | "price-high")}
@@ -310,20 +312,27 @@ const Boats = () => {
                     {activeFiltersCount > 0 ? `${activeFiltersCount} filters active` : "No active filters"}
                   </p>
                   <button onClick={resetFilters} className="text-sm text-aegean hover:text-turquoise transition-colors">
-                    Reset all filters
+                    {tl("Reset all filters", "Επαναφορά όλων")}
                   </button>
                 </div>
               </CardContent>
             </Card>
 
             <div className="flex flex-wrap items-center gap-5 text-sm text-muted-foreground">
-              <span className="flex items-center gap-1.5"><Anchor className="h-4 w-4 text-aegean" />{filteredBoats.length} boats available</span>
-              <span className="flex items-center gap-1.5"><MapPin className="h-4 w-4 text-aegean" />Greek islands</span>
-              <span className="flex items-center gap-1.5"><Users className="h-4 w-4 text-aegean" />Group sizes from 4 to 20</span>
-              <span className="flex items-center gap-1.5"><Sparkles className="h-4 w-4 text-aegean" />Verified and highly rated hosts</span>
+              <span className="flex items-center gap-1.5"><Anchor className="h-4 w-4 text-aegean" />{filteredBoats.length} {tl("boats available", "διαθέσιμα σκάφη")}</span>
+              <span className="flex items-center gap-1.5"><MapPin className="h-4 w-4 text-aegean" />{tl("Greek islands", "Ελληνικά νησιά")}</span>
+              <span className="flex items-center gap-1.5"><Users className="h-4 w-4 text-aegean" />{tl("Group sizes from 4 to 20", "Ομάδες από 4 έως 20 άτομα")}</span>
+              <span className="flex items-center gap-1.5"><Sparkles className="h-4 w-4 text-aegean" />{tl("Verified and highly rated hosts", "Επαληθευμένοι και υψηλά αξιολογημένοι οικοδεσπότες")}</span>
             </div>
 
-            {filteredBoats.length > 0 ? (
+            {isBoatsLoading ? (
+              <Card>
+                <CardContent className="py-10 text-center space-y-2">
+                  <p className="text-lg font-semibold text-foreground">{tl("Loading boats…", "Φόρτωση σκαφών…")}</p>
+                  <p className="text-sm text-muted-foreground">{tl("Syncing latest availability from Supabase.", "Συγχρονισμός διαθεσιμότητας από το Supabase.")}</p>
+                </CardContent>
+              </Card>
+            ) : filteredBoats.length > 0 ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {filteredBoats.map((boat, index) => (
                   <div key={boat.name} className="space-y-2">
@@ -340,15 +349,15 @@ const Boats = () => {
             ) : (
               <Card>
                 <CardContent className="py-10 text-center space-y-2">
-                  <p className="text-lg font-semibold text-foreground">No boats found</p>
-                  <p className="text-sm text-muted-foreground">Try a different location or lower minimum capacity.</p>
+                  <p className="text-lg font-semibold text-foreground">{tl("No boats found", "Δεν βρέθηκαν σκάφη")}</p>
+                  <p className="text-sm text-muted-foreground">{tl("Try a different location or lower minimum capacity.", "Δοκίμασε άλλη τοποθεσία ή χαμηλότερη ελάχιστη χωρητικότητα.")}</p>
                 </CardContent>
               </Card>
             )}
 
             <div className="text-center pt-2">
               <Link to="/owner-profile" className="text-aegean hover:text-turquoise transition-colors font-medium">
-                Are you a boat owner? View owner profile →
+                {tl("Are you a boat owner? View owner profile →", "Είσαι ιδιοκτήτης σκάφους; Δες το προφίλ ιδιοκτήτη →")}
               </Link>
             </div>
           </div>

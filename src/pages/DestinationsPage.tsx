@@ -8,8 +8,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getDestinations, type Destination } from "@/lib/destinations";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const DestinationsPage = () => {
+  const { tl } = useLanguage();
   useSEO({
     title: "Greek Island Boating Destinations | Nautiq",
     description: "Explore the best Greek island destinations for boat rentals — Mykonos, Santorini, Thassos, Halkidiki and more. Find your perfect sea escape.",
@@ -18,14 +20,21 @@ const DestinationsPage = () => {
   });
 
   const [destinations, setDestinations] = useState<Destination[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
 
     const loadDestinations = async () => {
-      const nextDestinations = await getDestinations();
-      if (!cancelled) {
-        setDestinations(nextDestinations);
+      try {
+        const nextDestinations = await getDestinations();
+        if (!cancelled) {
+          setDestinations(nextDestinations);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
       }
     };
 
@@ -50,10 +59,10 @@ const DestinationsPage = () => {
           <div className="container mx-auto px-4">
             <p className="text-primary-foreground/80 text-sm mb-3">Destination guide</p>
             <h1 className="text-3xl md:text-5xl font-heading font-bold text-primary-foreground mb-4">
-              Discover Greek islands made for boating
+              {tl("Discover Greek islands made for boating", "Ανακάλυψε ελληνικά νησιά ιδανικά για θαλάσσιες εξορμήσεις")}
             </h1>
             <p className="text-primary-foreground/70 max-w-2xl">
-              Compare top islands, trip styles, and available fleets before you book.
+              {tl("Compare top islands, trip styles, and available fleets before you book.", "Σύγκρινε κορυφαία νησιά, στυλ εκδρομής και διαθέσιμους στόλους πριν κάνεις κράτηση.")}
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-8">
@@ -62,7 +71,7 @@ const DestinationsPage = () => {
                   <Ship className="h-5 w-5" />
                   <div>
                     <p className="text-2xl font-heading font-bold">{totalBoats}</p>
-                    <p className="text-sm text-primary-foreground/80">Boats listed</p>
+                    <p className="text-sm text-primary-foreground/80">{tl("Boats listed", "Καταχωρημένα σκάφη")}</p>
                   </div>
                 </CardContent>
               </Card>
@@ -71,7 +80,7 @@ const DestinationsPage = () => {
                   <MapPinned className="h-5 w-5" />
                   <div>
                     <p className="text-2xl font-heading font-bold">{destinations.length}</p>
-                    <p className="text-sm text-primary-foreground/80">Popular islands</p>
+                    <p className="text-sm text-primary-foreground/80">{tl("Popular islands", "Δημοφιλή νησιά")}</p>
                   </div>
                 </CardContent>
               </Card>
@@ -80,7 +89,7 @@ const DestinationsPage = () => {
                   <Sparkles className="h-5 w-5" />
                   <div>
                     <p className="text-2xl font-heading font-bold">4.8</p>
-                    <p className="text-sm text-primary-foreground/80">Average ratings</p>
+                    <p className="text-sm text-primary-foreground/80">{tl("Average ratings", "Μέση βαθμολογία")}</p>
                   </div>
                 </CardContent>
               </Card>
@@ -90,7 +99,11 @@ const DestinationsPage = () => {
 
         <section className="py-10 md:py-12">
           <div className="container mx-auto px-4 grid grid-cols-1 md:grid-cols-2 gap-6">
-            {destinations.map((destination) => (
+            {isLoading ? (
+              <Card className="md:col-span-2">
+                <CardContent className="py-10 text-center text-muted-foreground">{tl("Loading destinations…", "Φόρτωση προορισμών…")}</CardContent>
+              </Card>
+            ) : destinations.map((destination) => (
               <Card key={destination.id} id={destination.slug} className="overflow-hidden shadow-card-hover scroll-mt-24">
                 <div className="aspect-[16/9] overflow-hidden">
                   <img src={destination.image} alt={destination.name} className="w-full h-full object-cover" />
@@ -104,12 +117,12 @@ const DestinationsPage = () => {
                 <CardContent className="space-y-4">
                   <p className="text-muted-foreground">{destination.description}</p>
                   <p className="text-sm text-foreground">
-                    <span className="text-muted-foreground">Best for: </span>
+                    <span className="text-muted-foreground">{tl("Best for:", "Κατάλληλο για:")} </span>
                     {destination.bestFor}
                   </p>
                   <Button asChild className="w-full bg-gradient-accent text-accent-foreground">
                     <Link to={`/boats?location=${encodeURIComponent(destination.name)}`}>
-                      Explore boats in {destination.name}
+                      {tl("Explore boats in", "Δες σκάφη σε")} {destination.name}
                     </Link>
                   </Button>
                 </CardContent>
@@ -123,13 +136,13 @@ const DestinationsPage = () => {
             <Card>
               <CardContent className="pt-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
-                  <p className="font-semibold text-foreground">Need help choosing an island?</p>
-                  <p className="text-sm text-muted-foreground">Start with your group size and preferred vibe, then filter boats in one click.</p>
+                  <p className="font-semibold text-foreground">{tl("Need help choosing an island?", "Χρειάζεσαι βοήθεια για επιλογή νησιού;")}</p>
+                  <p className="text-sm text-muted-foreground">{tl("Start with your group size and preferred vibe, then filter boats in one click.", "Ξεκίνα με το μέγεθος της ομάδας και το στυλ που προτιμάς, και φιλτράρισε σκάφη με ένα κλικ.")}</p>
                 </div>
                 <Button asChild variant="outline" className="gap-2">
                   <Link to="/boats">
                     <Compass className="h-4 w-4" />
-                    Browse all boats
+                    {tl("Browse all boats", "Περιήγηση σε όλα τα σκάφη")}
                   </Link>
                 </Button>
               </CardContent>

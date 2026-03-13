@@ -12,10 +12,12 @@ import { getBoatById } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const PostTripReview = () => {
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
+  const { tl } = useLanguage();
 
   const bookingId = searchParams.get("bookingId") ?? "";
   const boatId = searchParams.get("boatId") ?? "";
@@ -43,8 +45,8 @@ const PostTripReview = () => {
   const submitReview = async () => {
     if (!boat || !customerName.trim() || !title.trim() || !comment.trim()) {
       toast({
-        title: "Missing review fields",
-        description: "Add name, title and comment before posting.",
+        title: tl("Missing review fields", "Λείπουν πεδία αξιολόγησης"),
+        description: tl("Add name, title and comment before posting.", "Πρόσθεσε όνομα, τίτλο και σχόλιο πριν την υποβολή."),
         variant: "destructive",
       });
       return;
@@ -62,8 +64,8 @@ const PostTripReview = () => {
 
     setSubmitted(true);
     toast({
-      title: "Review posted",
-      description: `Thanks! Your review for ${boat.name} is now visible.`,
+      title: tl("Review posted", "Η αξιολόγηση δημοσιεύτηκε"),
+      description: tl(`Thanks! Your review for ${boat.name} is now visible.`, `Ευχαριστούμε! Η αξιολόγησή σου για το ${boat.name} είναι πλέον ορατή.`),
     });
   };
 
@@ -74,10 +76,10 @@ const PostTripReview = () => {
       <main className="pt-16">
         <section className="py-14 border-b border-border bg-muted/30">
           <div className="container mx-auto px-4">
-            <p className="text-sm text-muted-foreground">Post-trip review</p>
-            <h1 className="text-4xl font-heading font-bold text-foreground mt-2">Share your trip feedback</h1>
+            <p className="text-sm text-muted-foreground">{tl("Post-trip review", "Αξιολόγηση μετά την εκδρομή")}</p>
+            <h1 className="text-4xl font-heading font-bold text-foreground mt-2">{tl("Share your trip feedback", "Μοιράσου την εμπειρία της εκδρομής σου")}</h1>
             <p className="text-muted-foreground mt-3 max-w-2xl">
-              Your review helps us rank and promote the best boats with real customer quality signals.
+              {tl("Your review helps us rank and promote the best boats with real customer quality signals.", "Η αξιολόγησή σου μας βοηθά να αναδεικνύουμε τα καλύτερα σκάφη με πραγματικά δεδομένα ποιότητας από πελάτες.")}
             </p>
           </div>
         </section>
@@ -86,13 +88,13 @@ const PostTripReview = () => {
           <div className="container mx-auto px-4 max-w-2xl">
             <Card className="shadow-card">
               <CardHeader>
-                <CardTitle>{boat ? `Review for ${boat.name}` : "Select a valid booking"}</CardTitle>
+                <CardTitle>{boat ? tl(`Review for ${boat.name}`, `Αξιολόγηση για ${boat.name}`) : tl("Select a valid booking", "Επίλεξε έγκυρη κράτηση")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <Input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder="Your name" />
+                <Input value={customerName} onChange={(event) => setCustomerName(event.target.value)} placeholder={tl("Your name", "Το όνομά σου")} />
 
                 <div className="space-y-2">
-                  <p className="text-sm font-medium text-foreground">Rating</p>
+                  <p className="text-sm font-medium text-foreground">{tl("Rating", "Βαθμολογία")}</p>
                   <div className="flex gap-2">
                     {[1, 2, 3, 4, 5].map((value) => (
                       <button
@@ -109,16 +111,16 @@ const PostTripReview = () => {
                   </div>
                 </div>
 
-                <Input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Short title" />
-                <Textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Tell other travelers what was great about the trip" />
+                <Input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={tl("Short title", "Σύντομος τίτλος")} />
+                <Textarea value={comment} onChange={(event) => setComment(event.target.value)} placeholder={tl("Tell other travelers what was great about the trip", "Πες στους άλλους ταξιδιώτες τι σου άρεσε περισσότερο στην εκδρομή")} />
 
                 <Button className="w-full bg-gradient-accent text-accent-foreground" onClick={submitReview} disabled={submitted || !boat}>
-                  {submitted ? "Review submitted" : "Submit review"}
+                  {submitted ? tl("Review submitted", "Η αξιολόγηση υποβλήθηκε") : tl("Submit review", "Υποβολή αξιολόγησης")}
                 </Button>
 
                 {boat ? (
                   <Button asChild variant="outline" className="w-full">
-                    <Link to={`/boats/${boat.id}`}>Back to boat profile</Link>
+                    <Link to={`/boats/${boat.id}`}>{tl("Back to boat profile", "Επιστροφή στο προφίλ σκάφους")}</Link>
                   </Button>
                 ) : null}
               </CardContent>
