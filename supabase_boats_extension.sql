@@ -180,3 +180,58 @@ on public.favorites
 for all to authenticated
 using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
+
+-- ── 6. Keep boats.rating synced with average review score ──
+create or replace function public.sync_boat_rating_from_reviews()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_boat_id uuid;
+begin
+  if tg_op = 'DELETE' then
+    target_boat_id := old.boat_id;
+  else
+    target_boat_id := new.boat_id;
+  end if;
+
+  if target_boat_id is not null then
+    update public.boats
+    set
+      rating = coalesce((
+        select round(avg(r.rating)::numeric, 2)
+        from public.reviews r
+        where r.boat_id = target_boat_id
+      ), 0),
+      updated_at = now()
+    where id = target_boat_id;
+  end if;
+
+  if tg_op = 'UPDATE' and old.boat_id is distinct from new.boat_id and old.boat_id is not null then
+    update public.boats
+    set
+      rating = coalesce((
+        select round(avg(r.rating)::numeric, 2)
+        from public.reviews r
+        where r.boat_id = old.boat_id
+      ), 0),
+      updated_at = now()
+    where id = old.boat_id;
+  end if;
+
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_sync_boat_rating_from_reviews on public.reviews;
+create trigger trg_sync_boat_rating_from_reviews
+after insert or update of rating, boat_id or delete
+on public.reviews
+for each row
+execute function public.sync_boat_rating_from_reviews();

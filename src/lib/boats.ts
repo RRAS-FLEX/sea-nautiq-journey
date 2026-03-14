@@ -14,6 +14,7 @@ export interface BoatOwner {
 
 export interface Boat {
 	id: string;
+	publicSlug: string;
 	image: string;
 	images: string[];
 	name: string;
@@ -42,7 +43,7 @@ export interface Boat {
 	revenue: number;
 }
 
-const BOATS_CACHE_KEY = "nautiq:boats-cache:v2";
+const BOATS_CACHE_KEY = "nautiq:boats-cache:v3";
 const IMAGE_FILE_REGEX = /\.(avif|gif|jpe?g|png|webp|svg)$/i;
 
 const isBrowser = typeof window !== "undefined";
@@ -66,6 +67,43 @@ const writeCachedBoats = (boats: Boat[]) => {
 	} catch {
 		// Ignore cache write failures.
 	}
+};
+
+const slugifySegment = (value: string) =>
+	value
+		.toLowerCase()
+		.normalize("NFKD")
+		.replace(/[\u0300-\u036f]/g, "")
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "")
+		.replace(/-{2,}/g, "-");
+
+const shortBoatToken = (id: string) => {
+	let hash = 5381;
+	for (const char of id) {
+		hash = (hash * 33) ^ char.charCodeAt(0);
+	}
+	return Math.abs(hash >>> 0).toString(36).slice(0, 6);
+};
+
+export const buildBoatPublicSlug = (boatLike: { id: string; name: string; location: string }) => {
+	const base = [slugifySegment(boatLike.name), slugifySegment(boatLike.location)]
+		.filter(Boolean)
+		.join("-");
+	return `${base || "boat"}-${shortBoatToken(boatLike.id)}`;
+};
+
+export const buildBoatDetailsPath = (boatLike: { id: string; name: string; location: string; publicSlug?: string }) =>
+	`/boats/${boatLike.publicSlug || buildBoatPublicSlug(boatLike)}`;
+
+export const isBoatReferenceMatch = (boat: Pick<Boat, "id" | "publicSlug" | "name" | "location">, reference: string) => {
+	const normalizedReference = String(reference ?? "").trim();
+	if (!normalizedReference) return false;
+	return (
+		boat.id === normalizedReference ||
+		boat.publicSlug === normalizedReference ||
+		buildBoatPublicSlug(boat) === normalizedReference
+	);
 };
 
 const hasFileExtension = (value: string) => /\.\w{2,6}(\?|$)/.test(value);
@@ -168,6 +206,7 @@ const mapRow = async (row: any): Promise<Boat> => {
 
 	return {
 	id: row.id,
+	publicSlug: buildBoatPublicSlug({ id: row.id, name: row.name, location: row.location }),
 	images: resolvedImages,
 	image: resolvedImages[0] ?? "https://via.placeholder.com/400x300?text=Boat",
 	name: row.name,
@@ -309,5 +348,20 @@ export const getBoatById = async (id: string): Promise<Boat | null> => {
 
 	if (minimalError || !minimalData) return null;
 	return mapRow(minimalData);
+};
+
+export const getBoatByPublicReference = async (reference: string): Promise<Boat | null> => {
+	const normalizedReference = String(reference ?? "").trim();
+	if (!normalizedReference) {
+		return null;
+	}
+
+	const directMatch = await getBoatById(normalizedReference);
+	if (directMatch) {
+		return directMatch;
+	}
+
+	const boats = await getBoats();
+	return boats.find((boat) => isBoatReferenceMatch(boat, normalizedReference)) ?? null;
 };
 

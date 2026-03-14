@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useSEO } from "@/hooks/useSEO";
 import Navbar from "@/components/Navbar";
 import HeroSection from "@/components/HeroSection";
+import HomeValueStrip from "@/components/HomeValueStrip";
 import FeaturedBoats from "@/components/FeaturedBoats";
 import TopPackages from "@/components/TopPackages";
 import Destinations from "@/components/Destinations";
@@ -31,6 +32,7 @@ const Index = () => {
 
       <>
         <HeroSection onFindBoats={handleFindBoats} />
+        <HomeValueStrip />
         <FeaturedBoats searchCriteria={searchCriteria} />
         <TopPackages />
         <Destinations />

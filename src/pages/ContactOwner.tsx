@@ -7,23 +7,23 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { getBoatById } from "@/lib/boats";
+import { buildBoatDetailsPath, getBoatByPublicReference } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
 import { useLanguage } from "@/contexts/LanguageContext";
 
 const ContactOwner = () => {
   const { tl } = useLanguage();
   const [searchParams] = useSearchParams();
-  const boatId = searchParams.get("boatId");
+  const boatReference = searchParams.get("boatRef") ?? searchParams.get("boatId");
   const boatNameFromQuery = searchParams.get("boat") ?? "the selected boat";
   const [boat, setBoat] = useState<Boat | null>(null);
 
   useEffect(() => {
-    if (boatId) getBoatById(boatId).then(setBoat);
-  }, [boatId]);
+    if (boatReference) getBoatByPublicReference(boatReference).then(setBoat);
+  }, [boatReference]);
 
   const boatName = boat?.name ?? boatNameFromQuery;
-  const returnLink = boat ? `/boats/${boat.id}` : "/boats";
+  const returnLink = boat ? buildBoatDetailsPath(boat) : "/boats";
   const phoneNumber = "+302100000000";
   const ownerMessage = encodeURIComponent(
     `Hi, I am interested in ${boatName}. Could you share availability and trip options?`,

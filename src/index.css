@@ -6,7 +6,7 @@
 
 @layer base {
   :root {
-    --background: 210 33% 98%;
+    --background: 198 30% 97%;
     --foreground: 216 80% 14%;
 
     --card: 0 0% 100%;
@@ -18,29 +18,29 @@
     --primary: 216 80% 14%;
     --primary-foreground: 210 33% 98%;
 
-    --secondary: 213 78% 50%;
+    --secondary: 202 48% 56%;
     --secondary-foreground: 0 0% 100%;
 
-    --accent: 168 65% 54%;
+    --accent: 168 42% 58%;
     --accent-foreground: 216 80% 14%;
 
-    --muted: 210 20% 94%;
+    --muted: 198 18% 93%;
     --muted-foreground: 215 16% 47%;
 
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 210 20% 90%;
-    --input: 210 20% 90%;
-    --ring: 213 78% 50%;
+    --border: 200 19% 88%;
+    --input: 200 19% 88%;
+    --ring: 202 48% 56%;
 
     --radius: 0.75rem;
 
-    --ocean: 216 80% 14%;
-    --aegean: 213 78% 50%;
-    --turquoise: 168 65% 54%;
-    --sand: 210 33% 98%;
-    --sand-dark: 210 20% 94%;
+    --ocean: 204 38% 24%;
+    --aegean: 198 48% 46%;
+    --turquoise: 168 42% 58%;
+    --sand: 198 30% 97%;
+    --sand-dark: 198 18% 93%;
 
     --sidebar-background: 0 0% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
@@ -90,6 +90,11 @@
 
   body {
     @apply bg-background text-foreground font-body antialiased;
+    background-image:
+      radial-gradient(1200px circle at 0% 0%, hsl(190 45% 93% / 0.65), transparent 55%),
+      radial-gradient(900px circle at 100% 10%, hsl(38 65% 94% / 0.55), transparent 50%),
+      linear-gradient(180deg, hsl(var(--background)), hsl(var(--background)));
+    background-attachment: fixed;
   }
 
   h1, h2, h3, h4, h5, h6 {
@@ -121,7 +126,7 @@
   }
 
   .shadow-card {
-    box-shadow: 0 4px 24px -4px hsl(var(--ocean) / 0.08);
+    box-shadow: 0 4px 54px -4px hsl(var(--ocean) / 0.08);
   }
 
   .shadow-card-hover {

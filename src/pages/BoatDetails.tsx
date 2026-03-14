@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getBoatById } from "@/lib/boats";
+import { buildBoatPublicSlug, getBoatByPublicReference } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
 import { getBoatReviews, getBoatReviewStats } from "@/lib/reviews";
 import { trackBoatViewed, trackBookingStarted } from "@/lib/analytics";
@@ -20,17 +20,17 @@ import { useLanguage } from "@/contexts/LanguageContext";
 
 const BoatDetails = () => {
   const { tl } = useLanguage();
-  const { boatId } = useParams<{ boatId: string }>();
+  const { boatRef } = useParams<{ boatRef: string }>();
   const [boat, setBoat] = useState<Boat | null>(null);
   const [selectedImage, setSelectedImage] = useState(0);
   const bookingRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!boatId) return;
+    if (!boatRef) return;
     setBoat(null);
     setSelectedImage(0);
-    getBoatById(boatId).then(setBoat);
-  }, [boatId]);
+    getBoatByPublicReference(boatRef).then(setBoat);
+  }, [boatRef]);
 
   const unavailableDates = boat?.availability.unavailableDates.map((date) => parseISO(date)) ?? [];
   const nextAvailableDate = Array.from({ length: 21 }, (_, index) => {
@@ -45,6 +45,8 @@ const BoatDetails = () => {
   const mapEmbedUrl = boat ? `https://www.google.com/maps?q=${mapQuery}&z=13&output=embed` : "";
   const [boatReviews, setBoatReviews] = useState<any[]>([]);
   const [reviewStats, setReviewStats] = useState({ total: 0, averageRating: 0 });
+  const publicBoatRef = boat ? boat.publicSlug || buildBoatPublicSlug(boat) : "";
+  const publicBoatUrl = boat ? `https://nautiq.gr/boats/${publicBoatRef}` : undefined;
 
   useEffect(() => {
     if (!boat?.id) {
@@ -77,7 +79,7 @@ const BoatDetails = () => {
       },
       category: `${boat.type} Boat Rental`,
       sku: boat.id,
-      url: `https://nautiq.gr/boats/${boat.id}`,
+      url: publicBoatUrl,
       areaServed: {
         "@type": "Place",
         name: `${boat.location}, Greece`,
@@ -87,7 +89,7 @@ const BoatDetails = () => {
         priceCurrency: "EUR",
         price: boat.pricePerDay,
         availability: nextAvailableDate ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
-        url: `https://nautiq.gr/boats/${boat.id}`,
+        url: publicBoatUrl,
       },
       aggregateRating: reviewStats.total
         ? {
@@ -123,7 +125,7 @@ const BoatDetails = () => {
     description: boat
       ? `Rent the ${boat.name}, a ${boat.type} in ${boat.location} for €${boat.pricePerDay}/day. Capacity: ${boat.capacity} guests. ${boat.description?.slice(0, 100) ?? "Verified by Nautiq."}`.trim()
       : "View boat details, availability and book instantly on Nautiq.",
-    canonical: boat ? `https://nautiq.gr/boats/${boat.id}` : undefined,
+    canonical: publicBoatUrl,
     ogImage: boat?.image,
     ogType: "article",
     keywords: boat ? `${boat.name}, ${boat.type} rental ${boat.location}, boat hire ${boat.location} Greece` : undefined,
@@ -389,14 +391,14 @@ const BoatDetails = () => {
                   </div>
                   <Button asChild className="w-full bg-gradient-accent text-accent-foreground">
                     <Link
-                      to={`/booking?boatId=${encodeURIComponent(boat.id)}&boat=${encodeURIComponent(boat.name)}`}
+                      to={`/booking?boatRef=${encodeURIComponent(publicBoatRef)}&boat=${encodeURIComponent(boat.name)}`}
                       onClick={() => trackBookingStarted({ boatId: boat.id, boatName: boat.name, source: "boat_details" })}
                     >
                       {tl("Request Booking", "Αίτημα Κράτησης")}
                     </Link>
                   </Button>
                   <Button asChild variant="outline" className="w-full">
-                    <Link to={`/chat?boatId=${encodeURIComponent(boat.id)}&boat=${encodeURIComponent(boat.name)}`}>
+                    <Link to={`/chat?boatRef=${encodeURIComponent(publicBoatRef)}&boat=${encodeURIComponent(boat.name)}`}>
                       <MessageCircle className="mr-2 h-4 w-4" />{tl("Chat with owner", "Συνομιλία με ιδιοκτήτη")}
                     </Link>
                   </Button>

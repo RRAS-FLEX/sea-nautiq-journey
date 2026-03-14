@@ -5,6 +5,7 @@ import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { useFavorites } from "@/hooks/useFavorites";
+import { buildBoatDetailsPath } from "@/lib/boats";
 import { supabase } from "@/lib/supabase";
 import { resolveStorageImage } from "@/lib/storage-public";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -132,7 +133,7 @@ const Favorites = () => {
                         <span className="text-sm text-muted-foreground"> / day</span>
                       </div>
                       <Link
-                        to={`/boats/${boat.id}`}
+                        to={buildBoatDetailsPath({ id: boat.id, name: boat.name, location: boat.location })}
                         className="text-sm font-medium text-aegean hover:text-turquoise transition-colors"
                       >
                         {t("favorites.viewBoat")}

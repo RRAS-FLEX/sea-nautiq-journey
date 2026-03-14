@@ -19,6 +19,21 @@ export interface ChatThread {
   lastUpdatedAt: string;
 }
 
+const toReadableChatError = (error: any, fallback: string) => {
+  const message = String(error?.message ?? fallback);
+  const normalized = message.toLowerCase();
+
+  if (error?.code === "42P01" || normalized.includes("relation") && normalized.includes("chat_")) {
+    return "Chat tables are missing. Run supabase_full_app_migration.sql in Supabase SQL editor.";
+  }
+
+  if (normalized.includes("foreign key") || normalized.includes("violates foreign key")) {
+    return "Your account profile is not synced yet. Sign out/in and retry chat.";
+  }
+
+  return message || fallback;
+};
+
 const getCustomerSession = async () => {
   const {
     data: { session },
@@ -31,6 +46,34 @@ const getCustomerSession = async () => {
   return session;
 };
 
+const ensureCustomerProfile = async (session: { user: any }) => {
+  const email = session.user?.email?.trim?.().toLowerCase?.();
+  if (!email) {
+    throw new Error("Supabase user is missing an email address");
+  }
+
+  const fallbackName =
+    (typeof session.user?.user_metadata?.name === "string" && session.user.user_metadata.name.trim()) ||
+    email.split("@")[0] ||
+    "Nautiq User";
+
+  const { error } = await (supabase as any)
+    .from("users")
+    .upsert(
+      {
+        id: session.user.id,
+        email,
+        name: fallbackName,
+        is_owner: false,
+      },
+      { onConflict: "id" },
+    );
+
+  if (error) {
+    throw new Error(toReadableChatError(error, "Failed to sync user profile for chat"));
+  }
+};
+
 const mapMessage = (message: any): ChatMessage => ({
   id: message.id,
   boatId: message.boat_id,
@@ -40,7 +83,12 @@ const mapMessage = (message: any): ChatMessage => ({
 });
 
 export const getOrCreateThread = async (boatId: string, boatName: string, ownerName: string): Promise<ChatThread> => {
+  if (!boatId?.trim()) {
+    throw new Error("Missing boat context. Open chat from a boat profile.");
+  }
+
   const session = await getCustomerSession();
+  await ensureCustomerProfile(session);
   const threadsTable = (supabase as any).from("chat_threads");
   const messagesTable = (supabase as any).from("chat_messages");
 
@@ -62,10 +110,20 @@ export const getOrCreateThread = async (boatId: string, boatName: string, ownerN
       .single();
 
     if (error || !createdThread) {
-      throw new Error(error?.message || "Failed to create chat thread");
-    }
+      const maybeExisting = await threadsTable
+        .select("*")
+        .eq("boat_id", boatId)
+        .eq("customer_id", session.user.id)
+        .maybeSingle();
 
-    thread = createdThread;
+      if (maybeExisting?.data) {
+        thread = maybeExisting.data;
+      } else {
+        throw new Error(toReadableChatError(error, "Failed to create chat thread"));
+      }
+    } else {
+      thread = createdThread;
+    }
   }
 
   const { data: messageRows, error: messageError } = await messagesTable
@@ -74,7 +132,7 @@ export const getOrCreateThread = async (boatId: string, boatName: string, ownerN
     .order("created_at", { ascending: true });
 
   if (messageError) {
-    throw new Error(messageError.message || "Failed to load chat messages");
+    throw new Error(toReadableChatError(messageError, "Failed to load chat messages"));
   }
 
   return {
@@ -88,7 +146,12 @@ export const getOrCreateThread = async (boatId: string, boatName: string, ownerN
 };
 
 export const addMessage = async (boatId: string, sender: MessageSender, text: string): Promise<ChatMessage> => {
+  if (!boatId?.trim()) {
+    throw new Error("Missing boat context. Open chat from a boat profile.");
+  }
+
   const session = await getCustomerSession();
+  await ensureCustomerProfile(session);
   const thread = await getOrCreateThread(boatId, "Boat", "Owner");
   const { data, error } = await (supabase as any)
     .from("chat_messages")
@@ -103,7 +166,7 @@ export const addMessage = async (boatId: string, sender: MessageSender, text: st
     .single();
 
   if (error || !data) {
-    throw new Error(error?.message || "Failed to send message");
+    throw new Error(toReadableChatError(error, "Failed to send message"));
   }
 
   await (supabase as any).from("chat_threads").update({ last_updated_at: data.created_at }).eq("id", thread.id);
@@ -126,6 +189,10 @@ export const simulateOwnerReply = (boatId: string): ChatMessage => {
 };
 
 export const simulateOwnerReplyAsync = async (boatId: string): Promise<ChatMessage> => {
+  if (!boatId?.trim()) {
+    throw new Error("Missing boat context. Open chat from a boat profile.");
+  }
+
   const text = ownerReplies[Math.floor(Math.random() * ownerReplies.length)];
   const thread = await getOrCreateThread(boatId, "Boat", "Owner");
   const { data, error } = await (supabase as any)
@@ -141,7 +208,7 @@ export const simulateOwnerReplyAsync = async (boatId: string): Promise<ChatMessa
     .single();
 
   if (error || !data) {
-    throw new Error(error?.message || "Failed to simulate owner reply");
+    throw new Error(toReadableChatError(error, "Failed to simulate owner reply"));
   }
 
   await (supabase as any).from("chat_threads").update({ last_updated_at: data.created_at }).eq("id", thread.id);

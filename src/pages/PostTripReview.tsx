@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { addBoatReview } from "@/lib/reviews";
-import { getBoatById } from "@/lib/boats";
+import { buildBoatDetailsPath, getBoatByPublicReference } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
@@ -20,12 +20,12 @@ const PostTripReview = () => {
   const { tl } = useLanguage();
 
   const bookingId = searchParams.get("bookingId") ?? "";
-  const boatId = searchParams.get("boatId") ?? "";
+  const boatReference = searchParams.get("boatRef") ?? searchParams.get("boatId") ?? "";
   const [boat, setBoat] = useState<Boat | null>(null);
 
   useEffect(() => {
-    if (boatId) getBoatById(boatId).then(setBoat);
-  }, [boatId]);
+    if (boatReference) getBoatByPublicReference(boatReference).then(setBoat);
+  }, [boatReference]);
 
   const { user: sessionUser } = useCurrentUser();
   const [customerName, setCustomerName] = useState(sessionUser?.name ?? "");
@@ -120,7 +120,7 @@ const PostTripReview = () => {
 
                 {boat ? (
                   <Button asChild variant="outline" className="w-full">
-                    <Link to={`/boats/${boat.id}`}>{tl("Back to boat profile", "Επιστροφή στο προφίλ σκάφους")}</Link>
+                    <Link to={buildBoatDetailsPath(boat)}>{tl("Back to boat profile", "Επιστροφή στο προφίλ σκάφους")}</Link>
                   </Button>
                 ) : null}
               </CardContent>

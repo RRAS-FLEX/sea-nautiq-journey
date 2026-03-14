@@ -12,6 +12,17 @@ export interface CustomerHistoryItem {
   hasReview: boolean;
 }
 
+export interface OwnerSalesHistoryItem {
+  id: string;
+  boatId: string;
+  boatName: string;
+  customerName: string;
+  packageLabel: string;
+  startDate: string;
+  status: string;
+  totalPrice: number;
+}
+
 export const getCustomerBookingHistory = async (): Promise<CustomerHistoryItem[]> => {
   const {
     data: { session },
@@ -58,6 +69,58 @@ export const getCustomerBookingHistory = async (): Promise<CustomerHistoryItem[]
         status: booking.status ?? "confirmed",
         totalPrice: Number(booking.total_price ?? 0),
         hasReview: reviewIds.has(booking.id),
+      }))
+    : [];
+};
+
+export const getOwnerSalesHistory = async (): Promise<OwnerSalesHistoryItem[]> => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.user) {
+    return [];
+  }
+
+  const ownerId = session.user.id;
+
+  const { data: ownerBoats, error: boatsError } = await (supabase as any)
+    .from("boats")
+    .select("id")
+    .eq("owner_id", ownerId);
+
+  if (boatsError) {
+    throw new Error(boatsError.message || "Failed to load owner boats");
+  }
+
+  const boatIds = Array.isArray(ownerBoats)
+    ? ownerBoats.map((boat: any) => boat.id).filter(Boolean)
+    : [];
+
+  if (boatIds.length === 0) {
+    return [];
+  }
+
+  const { data: bookingsData, error: bookingsError } = await (supabase as any)
+    .from("bookings")
+    .select("id, boat_id, boat_name, customer_name, package_label, start_date, status, total_price")
+    .in("boat_id", boatIds)
+    .order("start_date", { ascending: false });
+
+  if (bookingsError) {
+    throw new Error(bookingsError.message || "Failed to load owner sales history");
+  }
+
+  return Array.isArray(bookingsData)
+    ? bookingsData.map((booking: any) => ({
+        id: booking.id,
+        boatId: booking.boat_id,
+        boatName: booking.boat_name ?? "Boat",
+        customerName: booking.customer_name ?? "Guest",
+        packageLabel: booking.package_label ?? "Custom booking",
+        startDate: booking.start_date,
+        status: booking.status ?? "confirmed",
+        totalPrice: Number(booking.total_price ?? 0),
       }))
     : [];
 };

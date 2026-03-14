@@ -128,6 +128,60 @@ alter table public.customer_emails enable row level security;
 alter table public.bookings enable row level security;
 alter table public.reviews enable row level security;
 
+create or replace function public.sync_boat_rating_from_reviews()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_boat_id uuid;
+begin
+  if tg_op = 'DELETE' then
+    target_boat_id := old.boat_id;
+  else
+    target_boat_id := new.boat_id;
+  end if;
+
+  if target_boat_id is not null then
+    update public.boats
+    set
+      rating = coalesce((
+        select round(avg(r.rating)::numeric, 2)
+        from public.reviews r
+        where r.boat_id = target_boat_id
+      ), 0),
+      updated_at = now()
+    where id = target_boat_id;
+  end if;
+
+  if tg_op = 'UPDATE' and old.boat_id is distinct from new.boat_id and old.boat_id is not null then
+    update public.boats
+    set
+      rating = coalesce((
+        select round(avg(r.rating)::numeric, 2)
+        from public.reviews r
+        where r.boat_id = old.boat_id
+      ), 0),
+      updated_at = now()
+    where id = old.boat_id;
+  end if;
+
+  if tg_op = 'DELETE' then
+    return old;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_sync_boat_rating_from_reviews on public.reviews;
+create trigger trg_sync_boat_rating_from_reviews
+after insert or update of rating, boat_id or delete
+on public.reviews
+for each row
+execute function public.sync_boat_rating_from_reviews();
+
 drop policy if exists "Users can manage own packages" on public.owner_packages;
 create policy "Users can manage own packages"
 on public.owner_packages

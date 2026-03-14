@@ -26,7 +26,7 @@ interface FeaturedBoatsProps {
 }
 
 const FeaturedBoats = ({ searchCriteria }: FeaturedBoatsProps) => {
-  const { t } = useLanguage();
+  const { t, tl } = useLanguage();
   const [reviewCounts, setReviewCounts] = useState<Record<string, number>>({});
   const [allBoats, setAllBoats] = useState<Boat[]>([]);
   const [isBoatsLoading, setIsBoatsLoading] = useState(true);
@@ -85,7 +85,7 @@ const FeaturedBoats = ({ searchCriteria }: FeaturedBoatsProps) => {
           className="text-center mb-12"
         >
           <p className="inline-flex items-center rounded-full border border-border bg-muted/40 px-3 py-1 text-xs text-muted-foreground mb-4">
-            {promotedBoats.length} {promotedBoats.length === 1 ? "boat" : "boats"} ready to book
+            {promotedBoats.length} {promotedBoats.length === 1 ? tl("boat", "σκάφος") : tl("boats", "σκάφη")} {tl("ready to book", "έτοιμα για κράτηση")}
           </p>
           <h2 className="text-3xl md:text-4xl font-heading font-bold text-foreground mb-3">
             {t("featured.title")}
@@ -105,7 +105,7 @@ const FeaturedBoats = ({ searchCriteria }: FeaturedBoatsProps) => {
 
           <div className="mt-4">
             <Link to="/boats" className="text-sm font-medium text-aegean hover:text-turquoise transition-colors">
-              Browse all boats →
+              {tl("Browse all boats →", "Περιήγηση σε όλα τα σκάφη →")}
             </Link>
           </div>
         </motion.div>

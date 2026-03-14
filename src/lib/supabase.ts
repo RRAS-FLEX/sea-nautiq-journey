@@ -258,19 +258,43 @@ export type Database = {
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
 
+const isLocalUrl = (value: string) => /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(value);
+
+const isAllowedSupabaseUrl = (value: string) => /^https:\/\//i.test(value) || isLocalUrl(value);
+
+const decodeJwtPayload = (token: string) => {
+	try {
+		const [, payload] = token.split(".");
+		if (!payload) return null;
+		const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+		const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=");
+		return JSON.parse(atob(padded));
+	} catch {
+		return null;
+	}
+};
+
+const isServiceRoleKey = (token: string) => {
+	const payload = decodeJwtPayload(token);
+	return payload?.role === "service_role";
+};
+
 let supabase: SupabaseClient<Database> | null = null;
 
-if (supabaseUrl && supabaseAnonKey) {
+if (supabaseUrl && supabaseAnonKey && isAllowedSupabaseUrl(supabaseUrl) && !isServiceRoleKey(supabaseAnonKey)) {
   supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
+      detectSessionInUrl: true,
+      flowType: "pkce",
+      storageKey: "nautiq.auth.token",
     },
   });
 } else {
   console.warn(
-    "Supabase environment variables not configured. Database features will be disabled. " +
-    "Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable."
+    "Supabase environment variables are missing or insecure. Database features will be disabled. " +
+    "Use an HTTPS Supabase URL (or localhost for dev) and only the anon public key, never the service_role key."
   );
   
   // Create a dummy client that won't throw errors

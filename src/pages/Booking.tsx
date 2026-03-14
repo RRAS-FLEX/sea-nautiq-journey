@@ -14,7 +14,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { confirmBookingWorkflow, type ConfirmBookingResult } from "@/lib/booking-workflow";
-import { getBoats } from "@/lib/boats";
+import { buildBoatDetailsPath, buildBoatPublicSlug, getBoats, isBoatReferenceMatch } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
 import { trackBookingConfirmed, trackBookingStarted } from "@/lib/analytics";
 import { signInWithGoogle } from "@/lib/auth-hybrid";
@@ -44,7 +44,7 @@ const Booking = () => {
   const { user: sessionUser } = useCurrentUser();
   const { toast } = useToast();
   const { tl } = useLanguage();
-  const boatId = searchParams.get("boatId");
+  const boatReference = searchParams.get("boatRef") ?? searchParams.get("boatId");
   const boatNameFromQuery = searchParams.get("boat") ?? "Selected boat";
   const [allBoats, setAllBoats] = useState<Boat[]>([]);
 
@@ -52,7 +52,9 @@ const Booking = () => {
     getBoats().then(setAllBoats).catch(() => setAllBoats([]));
   }, []);
 
-  const boat = allBoats.find((entry) => entry.id === boatId) ?? allBoats.find((entry) => entry.name === boatNameFromQuery);
+  const boat =
+    allBoats.find((entry) => (boatReference ? isBoatReferenceMatch(entry, boatReference) : false)) ??
+    allBoats.find((entry) => entry.name === boatNameFromQuery);
   const boatName = boat?.name ?? boatNameFromQuery;
   const dailyRate = boat?.pricePerDay ?? 450;
   const [selectedPackageId, setSelectedPackageId] = useState<(typeof packages)[number]["id"]>("half-day");
@@ -144,7 +146,7 @@ const Booking = () => {
       (date) => !unavailableDates.some((blockedDate) => isSameDay(blockedDate, date)),
     );
   }, [unavailableDates]);
-  const boatProfileLink = boat ? `/boats/${boat.id}` : "/boats";
+  const boatProfileLink = boat ? buildBoatDetailsPath(boat) : "/boats";
   const mapQuery = boat ? encodeURIComponent(boat.mapQuery) : "";
   const googleMapsUrl = boat ? `https://www.google.com/maps/search/?api=1&query=${mapQuery}` : "/boats";
   const googleDirectionsUrl = boat ? `https://www.google.com/maps/dir/?api=1&destination=${mapQuery}` : "/boats";
@@ -724,7 +726,7 @@ const Booking = () => {
 
                       <Button asChild variant="outline" className="w-full">
                         <Link
-                          to={`/post-trip-review?bookingId=${encodeURIComponent(workflowResult.booking.id)}&boatId=${encodeURIComponent(workflowResult.booking.boatId)}&boat=${encodeURIComponent(workflowResult.booking.boatName)}`}
+                          to={`/post-trip-review?bookingId=${encodeURIComponent(workflowResult.booking.id)}&boatRef=${encodeURIComponent(boat?.publicSlug || (boat ? buildBoatPublicSlug(boat) : workflowResult.booking.boatId))}&boat=${encodeURIComponent(workflowResult.booking.boatName)}`}
                         >
                           Post trip review
                         </Link>
@@ -776,7 +778,7 @@ const Booking = () => {
                       </div>
                     </div>
                     <Button asChild variant="outline" className="w-full">
-                      <Link to={`/contact-owner?boatId=${encodeURIComponent(boat.id)}&boat=${encodeURIComponent(boat.name)}`}>Ask host a question</Link>
+                      <Link to={`/contact-owner?boatRef=${encodeURIComponent(boat.publicSlug || buildBoatPublicSlug(boat))}&boat=${encodeURIComponent(boat.name)}`}>Ask host a question</Link>
                     </Button>
                   </CardContent>
                 </Card>

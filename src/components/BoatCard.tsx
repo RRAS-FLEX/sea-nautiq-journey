@@ -2,6 +2,7 @@ import { Star, Users, MapPin, Heart } from "lucide-react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { useFavorites } from "@/hooks/useFavorites";
+import { buildBoatDetailsPath } from "@/lib/boats";
 
 interface BoatCardProps {
   id?: string;
@@ -77,7 +78,7 @@ const BoatCard = ({ id, image, name, capacity, location, pricePerDay, rating, in
             <span className="text-sm text-muted-foreground"> / day</span>
           </div>
           {id ? (
-            <Link to={`/boats/${id}`} className="text-sm font-medium text-aegean hover:text-turquoise transition-colors">
+            <Link to={buildBoatDetailsPath({ id, name, location })} className="text-sm font-medium text-aegean hover:text-turquoise transition-colors">
               View Boat →
             </Link>
           ) : (
@@ -95,7 +96,7 @@ const BoatCard = ({ id, image, name, capacity, location, pricePerDay, rating, in
   }
 
   return (
-    <Link to={`/boats/${id}`} aria-label={`View ${name} boat details`} className="block">
+    <Link to={buildBoatDetailsPath({ id, name, location })} aria-label={`View ${name} boat details`} className="block">
       {cardContent}
     </Link>
   );

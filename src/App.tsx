@@ -163,7 +163,7 @@ const AppRoutes = () => (
     <Routes>
       <Route path="/" element={<Index />} />
       <Route path="/boats" element={<Boats />} />
-      <Route path="/boats/:boatId" element={<BoatDetails />} />
+      <Route path="/boats/:boatRef" element={<BoatDetails />} />
       <Route path="/destinations" element={<DestinationsPage />} />
       <Route path="/about" element={<About />} />
       <Route path="/owner-profile" element={<OwnerRoute><OwnerProfile /></OwnerRoute>} />
