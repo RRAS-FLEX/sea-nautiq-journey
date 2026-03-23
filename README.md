@@ -68,10 +68,27 @@ Then set your Google OAuth Web Client ID in `.env`:
 ```sh
 VITE_GOOGLE_CLIENT_ID=your-google-oauth-client-id.apps.googleusercontent.com
 VITE_GTM_ID=GTM-XXXXXXX
-VITE_STRIPE_PAYMENT_LINK=https://buy.stripe.com/test_your_payment_link_here
+VITE_API_BASE_URL=
+
+STRIPE_SECRET_KEY=sk_test_xxx
+STRIPE_PUBLISHABLE_KEY=pk_test_xxx
+STRIPE_WEBHOOK_SECRET=whsec_xxx
+
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+APP_BASE_URL=http://localhost:8080
+API_PORT=4242
 ```
 
-`VITE_STRIPE_PAYMENT_LINK` is used by the booking flow to open Stripe Checkout in a new tab after confirmation.
+Run the frontend and backend in parallel during development:
+
+```sh
+npm run dev
+npm run dev:api
+```
+
+Stripe integration uses hosted Stripe Checkout + Stripe Connect Express split payouts.
+Run `supabase_stripe_connect_setup.sql` in Supabase SQL editor before using it.
 
 If you see `401: invalid_client`:
 

@@ -2,16 +2,18 @@ import { getBoats } from "@/lib/boats";
 import type { Boat, BoatOwner } from "@/lib/boats";
 
 export const toOwnerSlug = (ownerName: string) =>
-  ownerName
+  (ownerName
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
+    .trim()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/(^-|-$)/g, "")) || "owner";
 
 export const getOwnerFleetBySlug = async (
   ownerSlug: string,
 ): Promise<{ ownerName: string; owner: BoatOwner | undefined; fleet: Boat[] }> => {
   const allBoats = await getBoats();
-  const fleet = allBoats.filter((b) => toOwnerSlug(b.owner.name) === ownerSlug);
+  const normalizedOwnerSlug = decodeURIComponent(ownerSlug || "").trim();
+  const fleet = allBoats.filter((b) => toOwnerSlug(b.owner.name) === normalizedOwnerSlug);
   return {
     ownerName: fleet[0]?.owner.name ?? "",
     fleet,

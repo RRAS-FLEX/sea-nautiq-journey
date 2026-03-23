@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { getBoats } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { withRetry } from "@/lib/retry";
 
 const packageBlueprints = [
   {
@@ -57,11 +58,23 @@ const TopPackages = () => {
   const { tl } = useLanguage();
   const [boats, setBoats] = useState<Boat[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
-    getBoats()
-      .then((data) => setBoats(data))
-      .finally(() => setIsLoading(false));
+    const loadBoats = async () => {
+      try {
+        setIsLoading(true);
+        setLoadError("");
+        const data = await withRetry(() => getBoats(), { retries: 2, initialDelayMs: 220 });
+        setBoats(data);
+      } catch (error) {
+        setLoadError(error instanceof Error ? error.message : "Unable to load packages.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    void loadBoats();
   }, []);
 
   const topPackages = useMemo(() => {
@@ -114,6 +127,8 @@ const TopPackages = () => {
                 <p className="text-xs text-muted-foreground">
                   {isLoading
                     ? tl("Calculating recommendation…", "Υπολογισμός πρότασης…")
+                    : loadError
+                      ? tl("Package estimates are temporarily unavailable.", "Οι εκτιμήσεις πακέτων δεν είναι διαθέσιμες προσωρινά.")
                     : `${tl("Projected platform earnings", "Εκτιμώμενα έσοδα πλατφόρμας")}: €${Math.round(pkg.projectedPlatformRevenue).toLocaleString()}`}
                 </p>
                 <div className="flex items-center justify-between">

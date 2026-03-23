@@ -57,6 +57,12 @@ export interface OwnerPackage {
   boatIds: string[];
 }
 
+export interface BoatExtra {
+  id: string;
+  name: string;
+  price: number;
+}
+
 export interface OwnerCalendarEvent {
   id: string;
   boatId: string;
@@ -476,6 +482,108 @@ export const getOwnerPackages = async (): Promise<OwnerPackage[]> => {
           .map((row: any) => row.boat_id)
       : [],
   }));
+};
+
+const BOAT_EXTRA_MARKER = "[boat-extra]";
+
+export const listBoatExtras = async (boatId: string): Promise<BoatExtra[]> => {
+  const session = await getSession();
+  const packageBoatsTable = (supabase as any).from("owner_package_boats");
+
+  const { data, error } = await packageBoatsTable
+    .select("package_id, owner_packages!inner(id, owner_id, name, price, description)")
+    .eq("boat_id", boatId)
+    .eq("owner_packages.owner_id", session.user.id);
+
+  if (error) {
+    throw new Error(error.message || "Failed to load boat extras");
+  }
+
+  return Array.isArray(data)
+    ? data
+        .filter((row: any) =>
+          typeof row.owner_packages?.description === "string" &&
+          row.owner_packages.description.includes(BOAT_EXTRA_MARKER),
+        )
+        .map((row: any) => ({
+          id: row.owner_packages.id,
+          name: row.owner_packages.name,
+          price: Number(row.owner_packages.price ?? 0),
+        }))
+    : [];
+};
+
+export const saveBoatExtras = async (
+  boatId: string,
+  extras: Array<{ name: string; price: number }>,
+): Promise<void> => {
+  const session = await getSession();
+  const packagesTable = (supabase as any).from("owner_packages");
+  const packageBoatsTable = (supabase as any).from("owner_package_boats");
+
+  const sanitizedExtras = extras
+    .map((extra) => ({
+      name: extra.name.trim(),
+      price: Number(extra.price) || 0,
+    }))
+    .filter((extra) => extra.name.length > 0);
+
+  const { data: existingLinks } = await packageBoatsTable
+    .select("package_id, owner_packages!inner(id, owner_id, description)")
+    .eq("boat_id", boatId)
+    .eq("owner_packages.owner_id", session.user.id);
+
+  const existingExtraPackageIds = Array.isArray(existingLinks)
+    ? existingLinks
+        .filter((row: any) =>
+          typeof row.owner_packages?.description === "string" &&
+          row.owner_packages.description.includes(BOAT_EXTRA_MARKER),
+        )
+        .map((row: any) => row.package_id)
+    : [];
+
+  if (existingExtraPackageIds.length > 0) {
+    await packageBoatsTable
+      .delete()
+      .eq("boat_id", boatId)
+      .in("package_id", existingExtraPackageIds);
+
+    await packagesTable
+      .delete()
+      .eq("owner_id", session.user.id)
+      .in("id", existingExtraPackageIds);
+  }
+
+  if (sanitizedExtras.length === 0) {
+    return;
+  }
+
+  const { data: insertedPackages, error: insertPackagesError } = await packagesTable
+    .insert(
+      sanitizedExtras.map((extra) => ({
+        owner_id: session.user.id,
+        name: extra.name,
+        duration_hours: 0,
+        price: extra.price,
+        description: `${BOAT_EXTRA_MARKER} Added from boat form`,
+      })),
+    )
+    .select("id");
+
+  if (insertPackagesError || !Array.isArray(insertedPackages)) {
+    throw new Error(insertPackagesError?.message || "Failed to save boat extras");
+  }
+
+  const { error: linkError } = await packageBoatsTable.insert(
+    insertedPackages.map((pkg: any) => ({
+      package_id: pkg.id,
+      boat_id: boatId,
+    })),
+  );
+
+  if (linkError) {
+    throw new Error(linkError.message || "Failed to link boat extras");
+  }
 };
 
 export const addOwnerPackage = async (pkg: Omit<OwnerPackage, "id">): Promise<OwnerPackage> => {

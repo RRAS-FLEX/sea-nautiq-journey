@@ -49,7 +49,7 @@ const Footer = () => {
           </div>
         </div>
         <div className="border-t border-border mt-10 pt-6 text-center text-xs text-muted-foreground">
-          © 2026 Nautiq. All rights reserved.
+          © 2026 Nautiplex. All rights reserved.
         </div>
       </div>
     </footer>

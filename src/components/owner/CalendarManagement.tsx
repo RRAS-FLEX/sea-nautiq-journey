@@ -17,6 +17,8 @@ import { getOwnerBoats, addCalendarEvent, getOwnerCalendarEvents, deleteCalendar
 const CalendarManagement = () => {
   const [boats, setBoats] = useState<OwnerBoat[]>([]);
   const [selectedBoatId, setSelectedBoatId] = useState<string>(boats[0]?.id || "");
+  const [startTime, setStartTime] = useState("09:00");
+  const [endTime, setEndTime] = useState("18:00");
   const [eventDate, setEventDate] = useState("");
   const [eventType, setEventType] = useState<"booked" | "blocked" | "maintenance">("blocked");
   const [guestName, setGuestName] = useState("");
@@ -53,10 +55,17 @@ const CalendarManagement = () => {
 
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!eventDate) return;
+    if (!startTime || !endTime || !eventDate) return;
+
+    if (startTime >= endTime) {
+      alert("End time must be later than start time.");
+      return;
+    }
 
     const createdEvent = await addCalendarEvent({
       boatId: selectedBoatId,
+      startTime,
+      endTime,
       date: eventDate,
       type: eventType,
       guestName: eventType === "booked" ? guestName : undefined,
@@ -67,6 +76,8 @@ const CalendarManagement = () => {
     setEventDate("");
     setGuestName("");
     setEventType("blocked");
+    setStartTime("09:00");
+    setEndTime("18:00");
     setShowForm(false);
   };
 
@@ -130,7 +141,29 @@ const CalendarManagement = () => {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="date">Date</Label>
+                      <Label htmlFor="start-time">Available From (hour)</Label>
+                      <Input
+                        id="start-time"
+                        type="time"
+                        value={startTime}
+                        onChange={(e) => setStartTime(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="end-time">Available To (hour)</Label>
+                      <Input
+                        id="end-time"
+                        type="time"
+                        value={endTime}
+                        onChange={(e) => setEndTime(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="date">Available Date</Label>
                       <Input
                         id="date"
                         type="date"
@@ -200,6 +233,11 @@ const CalendarManagement = () => {
                             month: "short",
                             day: "numeric",
                           })}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {event.startTime && event.endTime
+                            ? `${event.startTime.slice(0, 5)} - ${event.endTime.slice(0, 5)}`
+                            : "All day"}
                         </p>
                         {event.guestName && <p className="text-sm text-muted-foreground">Guest: {event.guestName}</p>}
                       </div>

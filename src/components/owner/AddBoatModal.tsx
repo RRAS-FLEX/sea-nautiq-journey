@@ -1,4 +1,4 @@
-﻿import { useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import { FileText, Trash2, UploadCloud, X } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -13,8 +13,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
-import { addOwnerBoat, updateOwnerBoat, OwnerBoat, BoatDocument } from "../../lib/owner-dashboard";
+import { addOwnerBoat, updateOwnerBoat, listBoatExtras, saveBoatExtras, OwnerBoat, BoatDocument } from "../../lib/owner-dashboard";
 import { resolveStorageImage } from "../../lib/storage-public";
+import { useToast } from "@/hooks/use-toast";
 
 interface AddBoatModalProps {
   onClose: () => void;
@@ -53,8 +54,24 @@ const DOCUMENT_LABELS = [
 ];
 
 const FORM_STEPS = ["Basics", "Details", "Media & Features", "Documents"];
+const QUICK_EXTRA_SUGGESTIONS = [
+  { name: "Champagne", price: 60 },
+  { name: "Fruit platter", price: 35 },
+  { name: "Premium snacks", price: 30 },
+  { name: "Drone photo package", price: 90 },
+  { name: "Paddle board", price: 40 },
+];
+
+const createLocalId = () => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `extra-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
 
 const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
+  const { toast } = useToast();
   const isEdit = Boolean(boat);
   const docInputRef = useRef<HTMLInputElement>(null);
   const [currentStep, setCurrentStep] = useState(1);
@@ -84,8 +101,68 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
   const [localImagePreview, setLocalImagePreview] = useState<string>("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [documents, setDocuments] = useState<BoatDocument[]>(boat?.documents ?? []);
+  const [extras, setExtras] = useState<Array<{ id: string; name: string; price: number }>>([]);
   const [docLabelIndex, setDocLabelIndex] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadExtras = async () => {
+      if (!boat?.id) {
+        setExtras([]);
+        return;
+      }
+
+      try {
+        const nextExtras = await listBoatExtras(boat.id);
+        if (!cancelled) {
+          setExtras(nextExtras.map((extra) => ({ ...extra, id: extra.id || createLocalId() })));
+        }
+      } catch {
+        if (!cancelled) {
+          setExtras([]);
+        }
+      }
+    };
+
+    loadExtras();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [boat?.id]);
+
+  const addExtraRow = () => {
+    setExtras((current) => [...current, { id: createLocalId(), name: "", price: 0 }]);
+  };
+
+  const addSuggestedExtra = (name: string, price: number) => {
+    setExtras((current) => {
+      if (current.some((extra) => extra.name.trim().toLowerCase() === name.trim().toLowerCase())) {
+        return current;
+      }
+
+      return [...current, { id: createLocalId(), name, price }];
+    });
+  };
+
+  const removeExtra = (id: string) => {
+    setExtras((current) => current.filter((extra) => extra.id !== id));
+  };
+
+  const updateExtra = (id: string, key: "name" | "price", value: string | number) => {
+    setExtras((current) =>
+      current.map((extra) =>
+        extra.id === id
+          ? {
+              ...extra,
+              [key]: key === "price" ? Number(value) || 0 : String(value),
+            }
+          : extra,
+      ),
+    );
+  };
 
   const handleToggleFeature = (feature: string) => {
     setFeatures((prev) =>
@@ -227,13 +304,44 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
     };
 
     try {
+      let savedBoatId = boat?.id ?? "";
+
       if (isEdit && boat) {
         await updateOwnerBoat(boat.id, payload);
+        savedBoatId = boat.id;
       } else {
-        await addOwnerBoat(payload);
+        const createdBoat = await addOwnerBoat(payload);
+        savedBoatId = createdBoat.id;
+      }
+
+      if (savedBoatId) {
+        await saveBoatExtras(
+          savedBoatId,
+          extras
+            .map((extra) => ({
+              name: extra.name,
+              price: Number(extra.price) || 0,
+            }))
+            .filter((extra) => extra.name.trim().length > 0),
+        );
       }
 
       onClose();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save boat";
+      const normalized = message.toLowerCase();
+      const isMfaPolicyError =
+        normalized.includes("boats_mfa_insert_guard") ||
+        normalized.includes("boats_mfa_update_guard") ||
+        (normalized.includes("row-level security") && normalized.includes("mfa"));
+
+      toast({
+        title: isMfaPolicyError ? "MFA required for owner actions" : "Could not save boat",
+        description: isMfaPolicyError
+          ? "Your account needs verified MFA to create or edit boats. Enable MFA in Supabase Auth and sign in again."
+          : message,
+        variant: "destructive",
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -252,7 +360,7 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
         </CardHeader>
 
         <CardContent className="pt-6">
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit} className="space-y-6" autoComplete="off" autoCorrect="off" spellCheck={false}>
             <div className="grid grid-cols-4 gap-2">
               {FORM_STEPS.map((step, index) => (
                 <div key={step} className="space-y-1">
@@ -402,6 +510,59 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
                       </label>
                     ))}
                   </div>
+                </div>
+
+                <div className="space-y-3 rounded-xl border border-border p-4 bg-muted/20">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <Label>Boat Extras (shown in booking)</Label>
+                    <Button type="button" variant="outline" size="sm" onClick={addExtraRow}>Add extra</Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Add optional paid extras like Champagne, snacks, paddle board, etc.</p>
+
+                  <div className="flex flex-wrap gap-2">
+                    {QUICK_EXTRA_SUGGESTIONS.map((suggestion) => (
+                      <button
+                        key={suggestion.name}
+                        type="button"
+                        onClick={() => addSuggestedExtra(suggestion.name, suggestion.price)}
+                        className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:border-aegean/40 hover:text-foreground"
+                      >
+                        + {suggestion.name} (€{suggestion.price})
+                      </button>
+                    ))}
+                  </div>
+
+                  {extras.length > 0 ? (
+                    <div className="space-y-2">
+                      {extras.map((extra) => (
+                        <div key={extra.id} className="grid grid-cols-1 sm:grid-cols-[1fr_140px_auto] gap-2 items-center rounded-lg border border-border p-2.5 bg-background">
+                          <Input
+                            value={extra.name}
+                            placeholder="e.g., Champagne"
+                            onChange={(e) => updateExtra(extra.id, "name", e.target.value)}
+                          />
+                          <Input
+                            type="number"
+                            min={0}
+                            value={extra.price}
+                            onChange={(e) => updateExtra(extra.id, "price", e.target.value)}
+                            placeholder="Price €"
+                          />
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeExtra(extra.id)}
+                            className="text-destructive hover:text-destructive"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground rounded-lg border border-dashed border-border p-3">No extras yet. Add one to upsell during booking.</p>
+                  )}
                 </div>
               </div>
             )}

@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSEO } from "@/hooks/useSEO";
-import { Compass, MapPinned, Ship, Sparkles } from "lucide-react";
+import { Compass, LayoutGrid, List, MapPinned, Rows3, Ship, Sparkles } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DestinationGridSkeleton } from "@/components/loading/LoadingUI";
 import { getDestinations, type Destination } from "@/lib/destinations";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { withRetry } from "@/lib/retry";
 
 const DestinationsPage = () => {
   const { tl } = useLanguage();
@@ -21,28 +23,24 @@ const DestinationsPage = () => {
 
   const [destinations, setDestinations] = useState<Destination[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [viewMode, setViewMode] = useState<"compact" | "comfortable" | "detailed">("comfortable");
+
+  const loadDestinations = async () => {
+    try {
+      setIsLoading(true);
+      setLoadError("");
+      const nextDestinations = await withRetry(() => getDestinations(), { retries: 2, initialDelayMs: 220 });
+      setDestinations(nextDestinations);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Unable to load destinations.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    let cancelled = false;
-
-    const loadDestinations = async () => {
-      try {
-        const nextDestinations = await getDestinations();
-        if (!cancelled) {
-          setDestinations(nextDestinations);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsLoading(false);
-        }
-      }
-    };
-
     loadDestinations();
-
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   const totalBoats = useMemo(
@@ -98,10 +96,55 @@ const DestinationsPage = () => {
         </section>
 
         <section className="py-10 md:py-12">
-          <div className="container mx-auto px-4 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="container mx-auto px-4 space-y-6">
+            <div className="flex justify-end">
+              <div className="flex items-center gap-1 rounded-lg border border-border p-1">
+                <Button
+                  size="sm"
+                  variant={viewMode === "compact" ? "default" : "ghost"}
+                  className="gap-1.5"
+                  onClick={() => setViewMode("compact")}
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                  {tl("Compact", "Συμπαγές")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant={viewMode === "comfortable" ? "default" : "ghost"}
+                  className="gap-1.5"
+                  onClick={() => setViewMode("comfortable")}
+                >
+                  <Rows3 className="h-4 w-4" />
+                  {tl("Comfort", "Άνετο")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant={viewMode === "detailed" ? "default" : "ghost"}
+                  className="gap-1.5"
+                  onClick={() => setViewMode("detailed")}
+                >
+                  <List className="h-4 w-4" />
+                  {tl("Detailed", "Αναλυτικό")}
+                </Button>
+              </div>
+            </div>
+
+            <div className={`grid gap-6 ${
+              viewMode === "detailed"
+                ? "grid-cols-1"
+                : viewMode === "compact"
+                  ? "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
+                  : "grid-cols-1 md:grid-cols-2"
+            }`}>
             {isLoading ? (
+              <DestinationGridSkeleton count={4} />
+            ) : loadError ? (
               <Card className="md:col-span-2">
-                <CardContent className="py-10 text-center text-muted-foreground">{tl("Loading destinations…", "Φόρτωση προορισμών…")}</CardContent>
+                <CardContent className="py-10 text-center space-y-3">
+                  <p className="text-lg font-semibold text-foreground">{tl("Could not load destinations", "Δεν φορτώθηκαν οι προορισμοί")}</p>
+                  <p className="text-sm text-muted-foreground">{loadError}</p>
+                  <Button variant="outline" onClick={loadDestinations}>{tl("Try again", "Δοκίμασε ξανά")}</Button>
+                </CardContent>
               </Card>
             ) : destinations.map((destination) => (
               <Card key={destination.id} id={destination.slug} className="overflow-hidden shadow-card-hover scroll-mt-24">
@@ -128,6 +171,7 @@ const DestinationsPage = () => {
                 </CardContent>
               </Card>
             ))}
+            </div>
           </div>
         </section>
 

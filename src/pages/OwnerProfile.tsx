@@ -1,8 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   BarChart3,
   CalendarCheck2,
+  Camera,
+  Flag,
+  Loader2,
   Pencil,
   Plus,
   MapPin,
@@ -12,7 +15,7 @@ import {
 } from "lucide-react";
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
-import { Avatar, AvatarFallback } from "../components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "../components/ui/avatar";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -21,28 +24,47 @@ import PackageManagement from "../components/owner/PackageManagement";
 import { getOwnerBoats, getOwnerStats, OwnerBoat } from "../lib/dashboard-hybrid";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { withRetry } from "@/lib/retry";
+import { supabase } from "@/lib/supabase";
+import { OwnerFleetPageSkeleton } from "@/components/loading/LoadingUI";
+import { useToast } from "@/hooks/use-toast";
+import { getUserAvatarUrl, uploadUserAvatar } from "@/lib/profile-avatar";
 
 const OwnerProfile = () => {
   const { tl } = useLanguage();
   const { user } = useCurrentUser();
+  const { toast } = useToast();
   const [showAddBoat, setShowAddBoat] = useState(false);
   const [editingBoat, setEditingBoat] = useState<OwnerBoat | null>(null);
   const [ownerBoats, setOwnerBoats] = useState<OwnerBoat[]>([]);
   const [ownerStatsData, setOwnerStatsData] = useState({ listedBoats: 0, totalBookings: 0, totalRevenue: 0 });
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [profileName, setProfileName] = useState(user?.name ?? "");
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setProfileName(user?.name ?? "");
+  }, [user?.name]);
 
   useEffect(() => {
     const loadData = async () => {
       try {
         setIsLoading(true);
+        setLoadError("");
         const [boatsData, statsData] = await Promise.all([
-          getOwnerBoats(),
-          getOwnerStats(),
+          withRetry(() => getOwnerBoats(), { retries: 2, initialDelayMs: 220 }),
+          withRetry(() => getOwnerStats(), { retries: 2, initialDelayMs: 220 }),
         ]);
         setOwnerBoats(boatsData);
         setOwnerStatsData(statsData);
       } catch (error) {
         console.error("Failed to load owner data:", error);
+        setLoadError(error instanceof Error ? error.message : "Unable to load owner data.");
       } finally {
         setIsLoading(false);
       }
@@ -51,23 +73,172 @@ const OwnerProfile = () => {
     loadData();
   }, []);
 
+  useEffect(() => {
+    if (!user?.id) {
+      setAvatarUrl(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadAvatar = async () => {
+      try {
+        const url = await getUserAvatarUrl(user.id);
+        if (!cancelled) {
+          setAvatarUrl(url);
+        }
+      } catch {
+        if (!cancelled) {
+          setAvatarUrl(null);
+        }
+      }
+    };
+
+    loadAvatar();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
+  const handleAvatarFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.currentTarget.value = "";
+
+    if (!file || !user?.id) {
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      toast({
+        title: "Invalid file type",
+        description: "Please choose an image file.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (file.size > 8 * 1024 * 1024) {
+      toast({
+        title: "Image too large",
+        description: "Please upload an image up to 8MB.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setIsUploadingAvatar(true);
+      const nextAvatarUrl = await uploadUserAvatar(user.id, file);
+      setAvatarUrl(nextAvatarUrl);
+      toast({
+        title: "Profile photo updated",
+        description: "Your avatar is now saved in Supabase Storage.",
+      });
+    } catch (error) {
+      toast({
+        title: "Upload failed",
+        description: error instanceof Error ? error.message : "Failed to upload avatar.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  };
+
   const refreshBoats = async () => {
     try {
-      const boatsData = await getOwnerBoats();
-      const statsData = await getOwnerStats();
+      const boatsData = await withRetry(() => getOwnerBoats(), { retries: 2, initialDelayMs: 220 });
+      const statsData = await withRetry(() => getOwnerStats(), { retries: 2, initialDelayMs: 220 });
       setOwnerBoats(boatsData);
       setOwnerStatsData(statsData);
+      setLoadError("");
     } catch (error) {
       console.error("Failed to refresh boats:", error);
+      setLoadError(error instanceof Error ? error.message : "Unable to refresh owner data.");
     }
   };
 
   const handleCloseAdd = () => { setShowAddBoat(false); refreshBoats(); };
   const handleCloseEdit = () => { setEditingBoat(null); refreshBoats(); };
 
+  const handleSaveProfile = async () => {
+    const trimmedName = profileName.trim();
+
+    if (!user?.id || !trimmedName) {
+      toast({
+        title: "Name is required",
+        description: "Please provide your full name.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      setIsSavingProfile(true);
+
+      const { error } = await (supabase as any)
+        .from("users")
+        .update({ name: trimmedName, updated_at: new Date().toISOString() })
+        .eq("id", user.id);
+
+      if (error) {
+        throw new Error(error.message || "Failed to update profile");
+      }
+
+      await supabase.auth.updateUser({
+        data: {
+          name: trimmedName,
+        },
+      });
+
+      setIsEditingProfile(false);
+      toast({
+        title: "Profile updated",
+        description: "Your profile details were saved.",
+      });
+      window.location.reload();
+    } catch (error) {
+      toast({
+        title: "Update failed",
+        description: error instanceof Error ? error.message : "Could not update your profile.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
   const averageRevenuePerBooking = ownerStatsData.totalBookings > 0
     ? Math.round(ownerStatsData.totalRevenue / ownerStatsData.totalBookings)
     : 0;
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        <OwnerFleetPageSkeleton />
+        <Footer />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        <main className="pt-24 pb-16">
+          <div className="container mx-auto px-4 text-center space-y-3">
+            <h1 className="text-3xl font-heading font-bold text-foreground">{tl("Could not load owner area", "Δεν φορτώθηκε η περιοχή ιδιοκτήτη")}</h1>
+            <p className="text-muted-foreground">{loadError}</p>
+            <div className="flex justify-center gap-3">
+              <Button variant="outline" onClick={() => window.location.reload()}>{tl("Reload page", "Ανανέωση σελίδας")}</Button>
+              <Button variant="outline" onClick={() => void refreshBoats()}>{tl("Try again", "Δοκίμασε ξανά")}</Button>
+            </div>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -80,14 +251,44 @@ const OwnerProfile = () => {
               <Card className="lg:col-span-2 shadow-card-hover">
                 <CardContent className="pt-6">
                   <div className="flex flex-col md:flex-row md:items-center gap-5">
+                    <div className="space-y-2">
                     <Avatar className="h-20 w-20 border border-border">
+                      {avatarUrl ? <AvatarImage src={avatarUrl} alt={user?.name ?? "Owner avatar"} /> : null}
                       <AvatarFallback className="text-xl font-semibold">
                         {user?.name?.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase() ?? "OW"}
                       </AvatarFallback>
                     </Avatar>
+                      <input
+                        ref={avatarInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleAvatarFileChange}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        disabled={isUploadingAvatar || !user?.id}
+                        onClick={() => avatarInputRef.current?.click()}
+                      >
+                        <Camera className="h-4 w-4" />
+                        {isUploadingAvatar ? "Uploading..." : "Add photo"}
+                      </Button>
+                    </div>
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h1 className="text-2xl md:text-3xl font-heading font-bold text-foreground">{user?.name ?? "Owner"}</h1>
+                        {isEditingProfile ? (
+                          <input
+                            value={profileName}
+                            onChange={(event) => setProfileName(event.target.value)}
+                            className="h-10 w-full max-w-sm rounded-md border border-border bg-background px-3 text-2xl md:text-3xl font-heading font-bold text-foreground"
+                            placeholder="Your full name"
+                          />
+                        ) : (
+                          <h1 className="text-2xl md:text-3xl font-heading font-bold text-foreground">{user?.name ?? "Owner"}</h1>
+                        )}
                         <Badge className="bg-gradient-accent text-accent-foreground">{tl("Verified Owner", "Επαληθευμένος Ιδιοκτήτης")}</Badge>
                       </div>
                       <p className="text-muted-foreground max-w-2xl">
@@ -97,6 +298,32 @@ const OwnerProfile = () => {
                         <MapPin className="h-4 w-4 text-aegean" />
                         Based in Thassos, Greece
                       </p>
+                      {isEditingProfile ? (
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="bg-gradient-accent text-accent-foreground"
+                            onClick={handleSaveProfile}
+                            disabled={isSavingProfile}
+                          >
+                            {isSavingProfile ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : null}
+                            Save profile
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setIsEditingProfile(false);
+                              setProfileName(user?.name ?? "");
+                            }}
+                            disabled={isSavingProfile}
+                          >
+                            Cancel
+                          </Button>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </CardContent>
@@ -107,9 +334,19 @@ const OwnerProfile = () => {
                   <CardTitle className="text-lg">{tl("Profile Actions", "Ενέργειες Προφίλ")}</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  <Button className="w-full bg-gradient-accent text-accent-foreground">{tl("Edit Profile", "Επεξεργασία Προφίλ")}</Button>
+                  <Button
+                    className="w-full bg-gradient-accent text-accent-foreground gap-2"
+                    onClick={() => setIsEditingProfile(true)}
+                    disabled={!user?.id}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    {tl("Edit Profile", "Επεξεργασία Προφίλ")}
+                  </Button>
                   <Button asChild variant="outline" className="w-full">
                     <Link to="/owner-dashboard">{tl("Open Owner Dashboard", "Άνοιγμα Πίνακα Ιδιοκτήτη")}</Link>
+                  </Button>
+                  <Button asChild variant="outline" className="w-full">
+                    <Link to="/chat">Owner inbox</Link>
                   </Button>
                   <Button variant="outline" className="w-full gap-2" onClick={() => setShowAddBoat(true)}>
                     <Plus className="h-4 w-4" />
@@ -117,6 +354,18 @@ const OwnerProfile = () => {
                   </Button>
                   <Button asChild variant="outline" className="w-full">
                     <Link to="/business-promotions">{tl("Business promotion tickets", "Αιτήματα προώθησης επιχειρήσεων")}</Link>
+                  </Button>
+                  <Button asChild variant="outline" className="w-full gap-2">
+                    <Link to="/report?type=customer">
+                      <Flag className="h-4 w-4" />
+                      {tl("Report a customer", "Αναφορά πελάτη")}
+                    </Link>
+                  </Button>
+                  <Button asChild variant="ghost" className="w-full gap-2 justify-start text-muted-foreground hover:text-foreground">
+                    <Link to="/report?type=website">
+                      <Flag className="h-4 w-4" />
+                      {tl("Report a website issue", "Αναφορά προβλήματος ιστοσελίδας")}
+                    </Link>
                   </Button>
                 </CardContent>
               </Card>

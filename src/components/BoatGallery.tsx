@@ -6,9 +6,8 @@ type BoatRecord = {
   id: string;
   name: string;
   description: string | null;
-  price: number | null;
+  price_per_day: number | null;
   image_url: string | null;
-  stripe_link: string | null;
 };
 
 type BoatCardProps = {
@@ -16,28 +15,52 @@ type BoatCardProps = {
 };
 
 function BoatCard({ boat }: BoatCardProps) {
-  const isTrustedStripeLink = (value: string) => {
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const priceLabel = typeof boat.price_per_day === "number" ? boat.price_per_day.toLocaleString() : "Contact for price";
+
+  const handleBookNow = async () => {
+    setActionError(null);
+    setIsRedirecting(true);
+
     try {
-      const url = new URL(value);
-      return ["https:"].includes(url.protocol) && ["checkout.stripe.com", "buy.stripe.com"].includes(url.hostname);
-    } catch {
-      return false;
+      const response = await fetch("/api/stripe/create-checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          boatId: boat.id,
+          successUrl: `${window.location.origin}/booking-confirmed`,
+          cancelUrl: window.location.href,
+        }),
+      });
+
+      const responseRaw = await response.text();
+      let payload: { sessionId?: string; checkoutUrl?: string; error?: string } = {};
+      if (responseRaw) {
+        try {
+          payload = JSON.parse(responseRaw);
+        } catch {
+          throw new Error("Stripe checkout API returned a non-JSON response. Check Vite /api proxy and API server logs.");
+        }
+      }
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "Failed to create checkout session");
+      }
+
+      const checkoutUrl = String(payload.checkoutUrl ?? "").trim();
+      if (checkoutUrl) {
+        window.location.assign(checkoutUrl);
+        return;
+      }
+
+      throw new Error("Stripe checkout URL is missing from API response.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Checkout failed";
+      setActionError(message);
+      setIsRedirecting(false);
     }
-  };
-
-  const isAvailable = Boolean(boat.stripe_link && isTrustedStripeLink(boat.stripe_link));
-  const priceLabel = typeof boat.price === "number" ? boat.price.toLocaleString() : "Contact for price";
-
-  const handleBookNow = () => {
-    if (!boat.stripe_link) {
-      return;
-    }
-
-    if (!isTrustedStripeLink(boat.stripe_link)) {
-      return;
-    }
-
-    window.location.href = boat.stripe_link;
   };
 
   return (
@@ -74,12 +97,13 @@ function BoatCard({ boat }: BoatCardProps) {
           <button
             type="button"
             onClick={handleBookNow}
-            disabled={!isAvailable}
+            disabled={isRedirecting}
             className="rounded-full bg-aegean px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-aegean/90 disabled:cursor-not-allowed disabled:bg-muted disabled:text-muted-foreground"
           >
-            {isAvailable ? "Book Now" : "Unavailable"}
+            {isRedirecting ? "Redirecting..." : "Book Now"}
           </button>
         </div>
+        {actionError ? <p className="text-xs text-destructive">{actionError}</p> : null}
       </div>
     </article>
   );
@@ -99,7 +123,7 @@ export default function BoatGallery() {
 
       const { data, error: fetchError } = await supabase
         .from("boats")
-        .select("id, name, description, price, image_url, stripe_link")
+        .select("id, name, description, price_per_day, image_url")
         .order("name", { ascending: true });
 
       if (!isMounted) {

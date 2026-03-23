@@ -1,12 +1,10 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
 
 type Language = "en" | "el";
 
 type TranslationDictionary = Record<string, string>;
 
 type TranslationMap = Record<Language, TranslationDictionary>;
-
-const STORAGE_KEY = "nautiq:language";
 
 const translations: TranslationMap = {
   en: {
@@ -52,7 +50,7 @@ const translations: TranslationMap = {
     "featured.loading": "Loading featured boats…",
     "featured.none": "No boats found for {location} with capacity for {passengers} passengers.",
 
-    "how.title": "How Nautiq Works",
+    "how.title": "How Nautiplex Works",
     "how.subtitle": "From search to boarding, the whole booking flow is optimized for speed, trust, and clear decisions.",
     "how.badge.owners": "Verified owners",
     "how.badge.pricing": "Transparent pricing",
@@ -65,8 +63,8 @@ const translations: TranslationMap = {
     "how.step3.title": "Enjoy the Sea",
     "how.step3.desc": "Meet your owner, board on time and enjoy a premium sea day across Greek islands.",
 
-    "ownerCta.title": "Own a Boat? Start earning with Nautiq.",
-    "ownerCta.subtitle": "Join hundreds of boat owners already earning with Nautiq across Greek islands.",
+    "ownerCta.title": "Own a Boat? Start earning with Nautiplex.",
+    "ownerCta.subtitle": "Join hundreds of boat owners already earning with Nautiplex across Greek islands.",
     "ownerCta.benefit1": "Reach tourists before they arrive",
     "ownerCta.benefit2": "Receive online bookings & deposits",
     "ownerCta.benefit3": "Manage your calendar easily",
@@ -125,7 +123,7 @@ const translations: TranslationMap = {
     "featured.loading": "Φόρτωση προτεινόμενων σκαφών…",
     "featured.none": "Δεν βρέθηκαν σκάφη για {location} με χωρητικότητα για {passengers} επιβάτες.",
 
-    "how.title": "Πώς λειτουργεί το Nautiq",
+    "how.title": "Πώς λειτουργεί το Nautiplex",
     "how.subtitle": "Από την αναζήτηση μέχρι την επιβίβαση, όλη η ροή κράτησης είναι βελτιστοποιημένη για ταχύτητα, εμπιστοσύνη και καθαρές επιλογές.",
     "how.badge.owners": "Επαληθευμένοι ιδιοκτήτες",
     "how.badge.pricing": "Διαφανείς τιμές",
@@ -138,8 +136,8 @@ const translations: TranslationMap = {
     "how.step3.title": "Απόλαυσε τη Θάλασσα",
     "how.step3.desc": "Συνάντησε τον ιδιοκτήτη, επιβιβάσου στην ώρα σου και απόλαυσε μια premium μέρα στη θάλασσα.",
 
-    "ownerCta.title": "Έχεις σκάφος; Ξεκίνα να κερδίζεις με το Nautiq.",
-    "ownerCta.subtitle": "Γίνε μέλος εκατοντάδων ιδιοκτητών που ήδη κερδίζουν με το Nautiq στα ελληνικά νησιά.",
+    "ownerCta.title": "Έχεις σκάφος; Ξεκίνα να κερδίζεις με το Nautiplex.",
+    "ownerCta.subtitle": "Γίνε μέλος εκατοντάδων ιδιοκτητών που ήδη κερδίζουν με το Nautiplex στα ελληνικά νησιά.",
     "ownerCta.benefit1": "Προσέγγισε τουρίστες πριν φτάσουν",
     "ownerCta.benefit2": "Δέξου online κρατήσεις και προκαταβολές",
     "ownerCta.benefit3": "Διαχειρίσου εύκολα το ημερολόγιό σου",
@@ -180,34 +178,15 @@ const interpolate = (template: string, params?: Record<string, string | number>)
 };
 
 export const LanguageProvider = ({ children }: { children: ReactNode }) => {
-  const [language, setLanguageState] = useState<Language>(() => {
-    if (typeof window === "undefined") {
-      return "en";
-    }
-
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    return stored === "el" ? "el" : "en";
-  });
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    window.localStorage.setItem(STORAGE_KEY, language);
-  }, [language]);
-
   const value = useMemo<LanguageContextValue>(() => ({
-    language,
-    setLanguage: (nextLanguage) => setLanguageState(nextLanguage),
+    language: "en",
+    setLanguage: () => undefined,
     t: (key, params) => {
-      const dictionary = translations[language] ?? translations.en;
       const fallback = translations.en[key] ?? key;
-      const resolved = dictionary[key] ?? fallback;
-      return interpolate(resolved, params);
+      return interpolate(fallback, params);
     },
-    tl: (english, greek) => (language === "el" ? greek : english),
-  }), [language]);
+    tl: (english) => english,
+  }), []);
 
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
 };

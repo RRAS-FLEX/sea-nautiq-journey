@@ -9,6 +9,7 @@ import { buildBoatDetailsPath } from "@/lib/boats";
 import { supabase } from "@/lib/supabase";
 import { resolveStorageImage } from "@/lib/storage-public";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { withRetry } from "@/lib/retry";
 
 type FavoriteBoat = {
   id: string;
@@ -24,36 +25,45 @@ const Favorites = () => {
   const { favoriteIds, toggleFavorite } = useFavorites();
   const [boats, setBoats] = useState<FavoriteBoat[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
   // favoriteIds is an array; join to a stable key so the effect re-runs when it changes
   const favKey = [...favoriteIds].sort().join(",");
 
-  useEffect(() => {
+  const loadFavorites = async () => {
     if (favoriteIds.length === 0) {
       setBoats([]);
+      setLoadError("");
       return;
     }
 
-    let isMounted = true;
     setLoading(true);
+    setLoadError("");
 
-    const fetchFavorites = async () => {
-      const { data } = await (supabase as any)
-        .from("boats")
-        .select("id, name, location, price_per_day, images, rating")
-        .in("id", favoriteIds);
+    try {
+      const data = await withRetry(async () => {
+        const { data: nextData, error } = await (supabase as any)
+          .from("boats")
+          .select("id, name, location, price_per_day, images, rating")
+          .in("id", favoriteIds);
 
-      if (isMounted) {
-        setBoats((data as FavoriteBoat[]) ?? []);
-        setLoading(false);
-      }
-    };
+        if (error) {
+          throw new Error(error.message || "Unable to load favorites");
+        }
 
-    void fetchFavorites();
+        return (nextData as FavoriteBoat[]) ?? [];
+      }, { retries: 2, initialDelayMs: 220 });
 
-    return () => {
-      isMounted = false;
-    };
+      setBoats(data);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : "Unable to load favorites.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadFavorites();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [favKey]);
 
@@ -100,6 +110,12 @@ const Favorites = () => {
               {favoriteIds.map((id) => (
                 <div key={id} className="rounded-2xl bg-muted animate-pulse aspect-[4/3]" />
               ))}
+            </div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-4 text-center">
+              <p className="text-lg font-semibold text-foreground">{t("favorites.title")}</p>
+              <p className="text-sm text-muted-foreground max-w-md">{loadError}</p>
+              <Button variant="outline" onClick={() => void loadFavorites()}>{language === "el" ? "Δοκίμασε ξανά" : "Try again"}</Button>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

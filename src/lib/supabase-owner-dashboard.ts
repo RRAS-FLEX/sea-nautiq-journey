@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
-import { Database } from "./supabase";
 import { resolveStorageImage } from "./storage-public";
+
+const sb = supabase as any;
 
 export interface OwnerBoat {
   id: string;
@@ -37,14 +38,14 @@ export interface OwnerStats {
 export const getOwnerBoats = async (): Promise<OwnerBoat[]> => {
   const {
     data: { session },
-  } = await supabase.auth.getSession();
+  } = await sb.auth.getSession();
 
   if (!session?.user) {
     return [];
   }
 
   // Fetch boats
-  const { data: boats, error: boatsError } = await supabase
+  const { data: boats, error: boatsError } = await sb
     .from("boats")
     .select("*")
     .eq("owner_id", session.user.id);
@@ -57,12 +58,12 @@ export const getOwnerBoats = async (): Promise<OwnerBoat[]> => {
   // For each boat, fetch features and documents
   const boatsWithDetails = await Promise.all(
     boats.map(async (boat) => {
-      const { data: features } = await supabase
+      const { data: features } = await sb
         .from("boat_features")
         .select("feature")
         .eq("boat_id", boat.id);
 
-      const { data: documents } = await supabase
+      const { data: documents } = await sb
         .from("boat_documents")
         .select("id, name, file_path, file_type")
         .eq("boat_id", boat.id);
@@ -102,14 +103,14 @@ export const addOwnerBoat = async (
 ): Promise<OwnerBoat> => {
   const {
     data: { session },
-  } = await supabase.auth.getSession();
+  } = await sb.auth.getSession();
 
   if (!session?.user) {
     throw new Error("You must be signed in to add a boat");
   }
 
   // Insert boat
-  const { data: newBoat, error: boatError } = await supabase
+  const { data: newBoat, error: boatError } = await sb
     .from("boats")
     .insert({
       owner_id: session.user.id,
@@ -135,7 +136,7 @@ export const addOwnerBoat = async (
       feature,
     }));
 
-    const { error: featuresError } = await supabase
+    const { error: featuresError } = await sb
       .from("boat_features")
       .insert(featureRows);
 
@@ -153,7 +154,7 @@ export const addOwnerBoat = async (
       file_type: doc.fileType,
     }));
 
-    const { error: docsError } = await supabase
+    const { error: docsError } = await sb
       .from("boat_documents")
       .insert(docRows);
 
@@ -188,14 +189,14 @@ export const updateOwnerBoat = async (
 ): Promise<void> => {
   const {
     data: { session },
-  } = await supabase.auth.getSession();
+  } = await sb.auth.getSession();
 
   if (!session?.user) {
     throw new Error("You must be signed in to update a boat");
   }
 
   // Update boat table
-  const { error: updateError } = await supabase
+  const { error: updateError } = await sb
     .from("boats")
     .update({
       name: updates.name,
@@ -217,7 +218,7 @@ export const updateOwnerBoat = async (
   // Update features if provided
   if (updates.features) {
     // Delete old features
-    await supabase.from("boat_features").delete().eq("boat_id", boatId);
+    await sb.from("boat_features").delete().eq("boat_id", boatId);
 
     // Insert new features
     const featureRows = updates.features.map((feature) => ({
@@ -226,7 +227,7 @@ export const updateOwnerBoat = async (
     }));
 
     if (featureRows.length > 0) {
-      const { error: featuresError } = await supabase
+      const { error: featuresError } = await sb
         .from("boat_features")
         .insert(featureRows);
 
@@ -243,13 +244,13 @@ export const updateOwnerBoat = async (
 export const deleteOwnerBoat = async (boatId: string): Promise<void> => {
   const {
     data: { session },
-  } = await supabase.auth.getSession();
+  } = await sb.auth.getSession();
 
   if (!session?.user) {
     throw new Error("You must be signed in to delete a boat");
   }
 
-  const { error } = await supabase
+  const { error } = await sb
     .from("boats")
     .delete()
     .eq("id", boatId)
@@ -266,26 +267,26 @@ export const deleteOwnerBoat = async (boatId: string): Promise<void> => {
 export const getOwnerStats = async (): Promise<OwnerStats> => {
   const {
     data: { session },
-  } = await supabase.auth.getSession();
+  } = await sb.auth.getSession();
 
   if (!session?.user) {
     return { listedBoats: 0, totalBookings: 0, totalRevenue: 0 };
   }
 
   // Get boat count
-  const { count: boatCount, error: boatError } = await supabase
+  const { count: boatCount, error: boatError } = await sb
     .from("boats")
     .select("*", { count: "exact", head: true })
     .eq("owner_id", session.user.id);
 
   // Get total bookings & revenue
-  const { data: bookingData, error: bookingError } = await supabase
+  const { data: bookingData, error: bookingError } = await sb
     .from("bookings")
     .select("total_price")
     .in(
       "boat_id",
       (
-        await supabase
+        await sb
           .from("boats")
           .select("id")
           .eq("owner_id", session.user.id)

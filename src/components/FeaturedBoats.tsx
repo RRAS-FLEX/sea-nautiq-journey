@@ -6,8 +6,10 @@ import { BoatSearchCriteria } from "@/lib/boat-search";
 import { getBoats } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
 import { sortBoatsByBookingsFirst } from "@/lib/boat-ranking";
-import { getBoatReviewStats } from "@/lib/reviews";
+import { getBoatReviewStatsMap } from "@/lib/reviews";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { withRetry } from "@/lib/retry";
+import { BoatsGridSkeleton } from "@/components/loading/LoadingUI";
 
 const formatSearchDateTime = (dateTime: string) => {
   const parsed = new Date(dateTime);
@@ -30,11 +32,23 @@ const FeaturedBoats = ({ searchCriteria }: FeaturedBoatsProps) => {
   const [reviewCounts, setReviewCounts] = useState<Record<string, number>>({});
   const [allBoats, setAllBoats] = useState<Boat[]>([]);
   const [isBoatsLoading, setIsBoatsLoading] = useState(true);
+  const [boatsError, setBoatsError] = useState("");
 
   useEffect(() => {
-    getBoats()
-      .then((data) => { setAllBoats(data); setIsBoatsLoading(false); })
-      .catch(() => setIsBoatsLoading(false));
+    const loadBoats = async () => {
+      try {
+        setIsBoatsLoading(true);
+        setBoatsError("");
+        const data = await withRetry(() => getBoats(), { retries: 2, initialDelayMs: 220 });
+        setAllBoats(data);
+      } catch (error) {
+        setBoatsError(error instanceof Error ? error.message : "Unable to load featured boats.");
+      } finally {
+        setIsBoatsLoading(false);
+      }
+    };
+
+    void loadBoats();
   }, []);
 
   const normalizedLocationFilter = searchCriteria?.location.trim().toLowerCase() ?? "";
@@ -55,11 +69,12 @@ const FeaturedBoats = ({ searchCriteria }: FeaturedBoatsProps) => {
 
     const loadReviewCounts = async () => {
       try {
-        const statsEntries = await Promise.all(
-          promotedBoats.map(async (boat) => [boat.id, (await getBoatReviewStats(boat.id)).total] as const),
-        );
+        const statsMap = await getBoatReviewStatsMap(promotedBoats.map((boat) => boat.id));
         if (isActive) {
-          setReviewCounts(Object.fromEntries(statsEntries));
+          const counts = Object.fromEntries(
+            Object.entries(statsMap).map(([boatId, stats]) => [boatId, stats.total]),
+          );
+          setReviewCounts(counts);
         }
       } catch {
         if (isActive) {
@@ -111,20 +126,13 @@ const FeaturedBoats = ({ searchCriteria }: FeaturedBoatsProps) => {
         </motion.div>
 
         {isBoatsLoading ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {Array.from({ length: 6 }, (_, index) => (
-              <div key={`boat-skeleton-${index}`} className="rounded-2xl border border-border bg-card overflow-hidden">
-                <div className="aspect-[4/3] bg-muted animate-pulse" />
-                <div className="p-4 space-y-3">
-                  <div className="h-4 w-2/3 rounded bg-muted animate-pulse" />
-                  <div className="h-3 w-1/2 rounded bg-muted animate-pulse" />
-                  <div className="h-3 w-1/3 rounded bg-muted animate-pulse" />
-                </div>
-              </div>
-            ))}
+          <BoatsGridSkeleton count={6} />
+        ) : boatsError ? (
+          <div className="text-center space-y-3">
+            <p className="text-muted-foreground text-lg">{boatsError}</p>
           </div>
         ) : filteredBoats.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {promotedBoats.map((boat, i) => (
               <BoatCard
                 key={boat.name}

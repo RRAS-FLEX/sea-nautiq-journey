@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
-import { Menu, X, ChevronDown } from "lucide-react";
+import { Menu, X, ChevronDown, User } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import NautiqLogo from "./NautiqLogo";
 import { Button } from "./ui/button";
+import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import AuthDialog from "./AuthDialog";
 import { signOut } from "@/lib/auth-hybrid";
 import type { AuthUser } from "@/lib/auth-hybrid";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { getUserAvatarUrl } from "@/lib/profile-avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,13 +24,40 @@ const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const { user: currentUser } = useCurrentUser();
-  const { language, setLanguage, t } = useLanguage();
+  const { t, tl } = useLanguage();
   const navigate = useNavigate();
 
   useEffect(() => {
     setAuthUser(currentUser ?? null);
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!authUser?.id) {
+      setAvatarUrl(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadAvatar = async () => {
+      try {
+        const url = await getUserAvatarUrl(authUser.id);
+        if (!cancelled) {
+          setAvatarUrl(url);
+        }
+      } catch {
+        if (!cancelled) {
+          setAvatarUrl(null);
+        }
+      }
+    };
+
+    loadAvatar();
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.id]);
 
   const handleAuthenticated = async (_user: AuthUser) => {
     // Full reload so all auth-dependent state refreshes cleanly
@@ -51,39 +80,45 @@ const Navbar = () => {
   };
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 bg-card/80 backdrop-blur-xl border-b border-border">
+    <nav className="fixed top-0 left-0 right-0 z-50 bg-card/90 backdrop-blur-xl border-b border-border shadow-[0_6px_24px_hsl(var(--ocean)_/_0.08)]">
       <div className="container mx-auto flex items-center justify-between h-16 px-4">
         <NautiqLogo />
 
         {/* Desktop Nav */}
         <div className="hidden md:flex items-center gap-6">
           <>
-            <Link to="/" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <Link to="/" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
               {t("nav.home")}
             </Link>
-            <Link to="/boats" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <Link to="/boats" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
               {t("nav.boats")}
             </Link>
-            <Link to="/destinations" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <Link to="/boats-map" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+              {tl("Map", "Χάρτης")}
+            </Link>
+            <Link to="/destinations" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
               {t("nav.destinations")}
             </Link>
-            <Link to="/about" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <Link to="/about" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
               {t("nav.about")}
             </Link>
           </>
-          <Button
-            size="sm"
-            variant="outline"
-            className="rounded-full px-3"
-            onClick={() => setLanguage(language === "en" ? "el" : "en")}
-          >
-            {language === "en" ? "EN" : "EL"}
-          </Button>
           {authUser ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button size="sm" variant="outline" className="rounded-full px-4 gap-2">
-                  {authUser.name}
+                <Button size="sm" variant="outline" className="rounded-full pl-2 pr-3 gap-2 max-w-[220px]">
+                  <Avatar className="h-6 w-6 border border-border">
+                    {avatarUrl ? <AvatarImage src={avatarUrl} alt={authUser.name} /> : null}
+                    <AvatarFallback className="text-[10px] font-semibold">
+                      {authUser.name
+                        .split(" ")
+                        .map((part) => part[0])
+                        .join("")
+                        .slice(0, 2)
+                        .toUpperCase() || "US"}
+                    </AvatarFallback>
+                  </Avatar>
+                  <span className="truncate">{authUser.name}</span>
                   <ChevronDown className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -118,6 +153,9 @@ const Navbar = () => {
                 <DropdownMenuItem asChild>
                   <Link to="/about">{t("nav.helpSupport")}</Link>
                 </DropdownMenuItem>
+                <DropdownMenuItem asChild>
+                  <Link to="/report">{tl("Report issue", "Αναφορά προβλήματος")}</Link>
+                </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={handleSignOut}>{t("nav.signOut")}</DropdownMenuItem>
               </DropdownMenuContent>
@@ -129,13 +167,64 @@ const Navbar = () => {
           )}
         </div>
 
-        {/* Mobile Menu Button */}
-        <button
-          className="md:hidden p-2"
-          onClick={() => setMobileOpen(!mobileOpen)}
-        >
-          {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-        </button>
+        {/* Mobile Actions */}
+        <div className="md:hidden flex items-center gap-1">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="rounded-full" aria-label={tl("Profile menu", "Μενού προφίλ")}>
+                {authUser ? (
+                  <Avatar className="h-7 w-7 border border-border">
+                    {avatarUrl ? <AvatarImage src={avatarUrl} alt={authUser.name} /> : null}
+                    <AvatarFallback className="text-[10px] font-semibold">
+                      {authUser.name
+                        .split(" ")
+                        .map((part) => part[0])
+                        .join("")
+                        .slice(0, 2)
+                        .toUpperCase() || "US"}
+                    </AvatarFallback>
+                  </Avatar>
+                ) : (
+                  <User className="h-5 w-5" />
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              {authUser ? (
+                <>
+                  <DropdownMenuLabel>{authUser.email}</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link to="/profile">{t("nav.profile")}</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/history">{t("nav.history")}</Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/favorites">{t("nav.favorites")}</Link>
+                  </DropdownMenuItem>
+                  {!authUser.isOwner ? (
+                    <DropdownMenuItem onClick={handleBecomeOwner}>{t("nav.becomeOwner")}</DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={handleSignOut}>{t("nav.signOut")}</DropdownMenuItem>
+                </>
+              ) : (
+                <DropdownMenuItem onClick={() => setAuthOpen(true)}>
+                  {t("nav.signIn")}
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <button
+            className="p-2"
+            onClick={() => setMobileOpen(!mobileOpen)}
+            aria-label={tl("Toggle menu", "Εναλλαγή μενού")}
+          >
+            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </button>
+        </div>
       </div>
 
       {/* Mobile Menu */}
@@ -152,13 +241,11 @@ const Navbar = () => {
                 <>
                   <Link to="/" className="text-sm text-muted-foreground py-2" onClick={() => setMobileOpen(false)}>{t("nav.home")}</Link>
                   <Link to="/boats" className="text-sm text-muted-foreground py-2" onClick={() => setMobileOpen(false)}>{t("nav.boats")}</Link>
+                  <Link to="/boats-map" className="text-sm text-muted-foreground py-2" onClick={() => setMobileOpen(false)}>{tl("Map", "Χάρτης")}</Link>
                   <Link to="/destinations" className="text-sm text-muted-foreground py-2" onClick={() => setMobileOpen(false)}>{t("nav.destinations")}</Link>
                   <Link to="/about" className="text-sm text-muted-foreground py-2" onClick={() => setMobileOpen(false)}>{t("nav.about")}</Link>
                 </>
               </div>
-              <Button variant="outline" className="w-full rounded-full" onClick={() => setLanguage(language === "en" ? "el" : "en")}>
-                {t("nav.language")}: {language === "en" ? "EN" : "EL"}
-              </Button>
               {authUser ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -201,6 +288,9 @@ const Navbar = () => {
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
                       <Link to="/about" onClick={() => setMobileOpen(false)}>{t("nav.helpSupport")}</Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link to="/report" onClick={() => setMobileOpen(false)}>{tl("Report issue", "Αναφορά προβλήματος")}</Link>
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={handleSignOut}>{t("nav.signOut")}</DropdownMenuItem>

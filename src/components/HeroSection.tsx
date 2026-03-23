@@ -120,22 +120,22 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
           alt="Luxury boat in turquoise Mediterranean waters"
           className="w-full h-full object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-ocean/70 via-ocean/50 to-ocean/80" />
+        <div className="absolute inset-0 bg-gradient-to-b from-ocean/60 via-ocean/45 to-ocean/75" />
       </div>
 
-      <div className="container relative z-10 mx-auto px-4 pt-24 pb-16">
+      <div className="container relative z-10 mx-auto px-4 pt-24 pb-16 md:pb-20">
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, ease: "easeOut" }}
           className="max-w-3xl"
         >
-          <h1 className="text-4xl md:text-6xl lg:text-7xl font-heading font-bold text-primary-foreground leading-[1.1] mb-4">
+          <h1 className="text-4xl md:text-6xl lg:text-7xl font-heading font-bold text-primary-foreground leading-[1.06] mb-4 drop-shadow-[0_8px_28px_hsl(210_100%_7%_/_0.35)]">
             {t("hero.titleLine1")}
             <br />
             <span className="text-turquoise">{t("hero.titleLine2")}</span>
           </h1>
-          <p className="text-lg md:text-xl text-primary-foreground/80 font-body max-w-xl mb-8">
+          <p className="text-lg md:text-xl text-primary-foreground/90 font-body max-w-2xl mb-8">
             {t("hero.subtitle")}
           </p>
         </motion.div>
@@ -145,11 +145,11 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.3 }}
-          className="bg-card rounded-2xl shadow-card-hover p-3 md:p-4 max-w-3xl"
+          className="bg-card/95 backdrop-blur-sm border border-border/70 rounded-2xl shadow-card-hover p-3 md:p-4 max-w-3xl"
           onSubmit={submitLocationSearch}
         >
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-muted">
+            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-muted/80 border border-border/50">
               <MapPin className="h-5 w-5 text-aegean shrink-0" />
               <div>
                 <p className="text-xs text-muted-foreground font-medium">{t("hero.location")}</p>
@@ -162,7 +162,7 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
                 />
               </div>
             </div>
-            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-muted">
+            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-muted/80 border border-border/50">
               <Calendar className="h-5 w-5 text-aegean shrink-0" />
               <div className="w-full min-w-0">
                 <p className="text-xs text-muted-foreground font-medium">{t("hero.date")}</p>
@@ -172,7 +172,7 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
                 />
               </div>
             </div>
-            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-muted">
+            <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-muted/80 border border-border/50">
               <Users className="h-5 w-5 text-aegean shrink-0" />
               <div>
                 <p className="text-xs text-muted-foreground font-medium">{t("hero.passengers")}</p>
@@ -187,7 +187,7 @@ const HeroSection = ({ onFindBoats }: HeroSectionProps) => {
                 />
               </div>
             </div>
-            <Button type="submit" disabled={!isSearchValid} className="bg-gradient-accent text-accent-foreground rounded-xl h-auto py-3 text-base font-semibold gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+            <Button type="submit" disabled={!isSearchValid} className="bg-gradient-accent text-accent-foreground rounded-xl h-auto py-3 text-base font-semibold gap-2 shadow-card disabled:opacity-50 disabled:cursor-not-allowed">
               <Search className="h-5 w-5" />
               {ctaVariant === "search-now" ? t("hero.searchNow") : t("hero.findBoats")}
             </Button>

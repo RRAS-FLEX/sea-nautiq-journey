@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
 import { getDestinations, type Destination } from "@/lib/destinations";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const Destinations = () => {
   const { tl } = useLanguage();
@@ -54,7 +55,14 @@ const Destinations = () => {
         </motion.div>
 
         {isLoading ? (
-          <p className="text-center text-muted-foreground">{tl("Loading destinations…", "Φόρτωση προορισμών…")}</p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={`destination-home-skeleton-${index}`} className="space-y-2">
+                <Skeleton className="aspect-[3/4] rounded-2xl" />
+                <Skeleton className="h-4 w-2/3 mx-auto" />
+              </div>
+            ))}
+          </div>
         ) : (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
           {destinations.map((dest, i) => (

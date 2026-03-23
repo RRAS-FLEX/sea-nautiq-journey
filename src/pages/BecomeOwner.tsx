@@ -50,6 +50,10 @@ const defaultForm = {
   boatCount: "",
   operatingSeason: "",
   website: "",
+  bankAccountHolder: "",
+  iban: "",
+  bankName: "",
+  stripeAccountId: "",
   notes: "",
   agreedToTerms: false,
 };
@@ -59,8 +63,18 @@ const BecomeOwner = () => {
   const { user, isLoading } = useCurrentUser();
   const { toast } = useToast();
   const [form, setForm] = useState(defaultForm);
+  const [ownerStep, setOwnerStep] = useState<1 | 2 | 3 | 4>(1);
   const [applicationStatus, setApplicationStatus] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const canContinueStep1 = Boolean(form.phone.trim());
+  const canContinueStep2 = Boolean(form.operatingArea.trim() && form.yearsExperience.trim());
+  const canContinueStep3 = Boolean(
+    form.boatCount.trim() &&
+    form.operatingSeason &&
+    form.bankAccountHolder.trim() &&
+    form.iban.trim(),
+  );
 
   const set = (key: keyof typeof defaultForm) => (value: string) =>
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -95,11 +109,13 @@ const BecomeOwner = () => {
       !form.operatingArea.trim() ||
       !form.yearsExperience.trim() ||
       !form.boatCount.trim() ||
-      !form.operatingSeason
+      !form.operatingSeason ||
+      !form.bankAccountHolder.trim() ||
+      !form.iban.trim()
     ) {
       toast({
         title: "Missing required fields",
-        description: tl("Fill in phone, operating area, experience, fleet size, and season.", "Συμπλήρωσε τηλέφωνο, περιοχή δραστηριότητας, εμπειρία, μέγεθος στόλου και περίοδο."),
+        description: tl("Fill in phone, operating area, experience, fleet size, season, account holder, and IBAN.", "Συμπλήρωσε τηλέφωνο, περιοχή δραστηριότητας, εμπειρία, μέγεθος στόλου, περίοδο, δικαιούχο λογαριασμού και IBAN."),
         variant: "destructive",
       });
       return;
@@ -128,6 +144,10 @@ const BecomeOwner = () => {
           SEASON_OPTIONS.find((s) => s.value === form.operatingSeason)?.label ??
           form.operatingSeason,
         website: form.website,
+        bankAccountHolder: form.bankAccountHolder,
+        iban: form.iban,
+        bankName: form.bankName,
+        stripeAccountId: form.stripeAccountId,
         notes: form.notes,
       });
       setApplicationStatus(application.status);
@@ -237,7 +257,17 @@ const BecomeOwner = () => {
                   </div>
                 )}
 
+                <div className="grid grid-cols-4 gap-2">
+                  {[1, 2, 3, 4].map((step) => (
+                    <div key={step} className="space-y-1">
+                      <div className={`h-1 rounded-full ${step <= ownerStep ? "bg-aegean" : "bg-muted"}`} />
+                      <p className={`text-xs ${step === ownerStep ? "text-foreground" : "text-muted-foreground"}`}>Step {step}</p>
+                    </div>
+                  ))}
+                </div>
+
                 {/* Section 1 — Personal info */}
+                {ownerStep === 1 ? (
                 <Card className="shadow-card-hover">
                   <CardHeader>
                     <CardTitle>Personal information</CardTitle>
@@ -280,8 +310,18 @@ const BecomeOwner = () => {
                     </div>
                   </CardContent>
                 </Card>
+                ) : null}
+
+                {ownerStep === 1 ? (
+                  <div className="flex justify-end">
+                    <Button className="bg-gradient-accent text-accent-foreground" onClick={() => setOwnerStep(2)} disabled={!canContinueStep1}>
+                      Continue
+                    </Button>
+                  </div>
+                ) : null}
 
                 {/* Section 2 — Experience */}
+                {ownerStep === 2 ? (
                 <Card className="shadow-card-hover">
                   <CardHeader>
                     <CardTitle>Experience & credentials</CardTitle>
@@ -360,8 +400,20 @@ const BecomeOwner = () => {
                     </div>
                   </CardContent>
                 </Card>
+                ) : null}
+
+                {ownerStep === 2 ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <Button variant="outline" onClick={() => setOwnerStep(1)}>Back</Button>
+                    <Button className="bg-gradient-accent text-accent-foreground" onClick={() => setOwnerStep(3)} disabled={!canContinueStep2}>
+                      Continue
+                    </Button>
+                  </div>
+                ) : null}
 
                 {/* Section 3 — Fleet plans */}
+                {ownerStep === 3 ? (
+                <>
                 <Card className="shadow-card-hover">
                   <CardHeader>
                     <CardTitle>Fleet plans</CardTitle>
@@ -398,6 +450,61 @@ const BecomeOwner = () => {
                             ))}
                           </SelectContent>
                         </Select>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="shadow-card-hover">
+                  <CardHeader>
+                    <CardTitle>Payout details</CardTitle>
+                    <CardDescription>
+                      Required so Stripe payouts can be configured for your owner account.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="bank-account-holder">
+                          Bank account holder <span className="text-destructive">*</span>
+                        </Label>
+                        <Input
+                          id="bank-account-holder"
+                          placeholder="Full legal name"
+                          value={form.bankAccountHolder}
+                          onChange={(e) => set("bankAccountHolder")(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="iban">
+                          IBAN <span className="text-destructive">*</span>
+                        </Label>
+                        <Input
+                          id="iban"
+                          placeholder="GR16 0110 1250 0000 0001 2300 695"
+                          value={form.iban}
+                          onChange={(e) => set("iban")(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="bank-name">Bank name (optional)</Label>
+                        <Input
+                          id="bank-name"
+                          placeholder="Alpha Bank"
+                          value={form.bankName}
+                          onChange={(e) => set("bankName")(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="stripe-account-id">Stripe account ID (optional)</Label>
+                        <Input
+                          id="stripe-account-id"
+                          placeholder="acct_1234..."
+                          value={form.stripeAccountId}
+                          onChange={(e) => set("stripeAccountId")(e.target.value)}
+                        />
                       </div>
                     </div>
                   </CardContent>
@@ -444,8 +551,20 @@ const BecomeOwner = () => {
                     />
                   </CardContent>
                 </Card>
+                </>
+                ) : null}
+
+                {ownerStep === 3 ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <Button variant="outline" onClick={() => setOwnerStep(2)}>Back</Button>
+                    <Button className="bg-gradient-accent text-accent-foreground" onClick={() => setOwnerStep(4)} disabled={!canContinueStep3}>
+                      Continue
+                    </Button>
+                  </div>
+                ) : null}
 
                 {/* Terms & Submit */}
+                {ownerStep === 4 ? (
                 <Card className="shadow-card">
                   <CardContent className="pt-6 space-y-4">
                     <div className="flex items-start gap-3">
@@ -480,8 +599,13 @@ const BecomeOwner = () => {
                           ? "Submitting…"
                           : "Submit application"}
                     </Button>
+
+                    <Button variant="outline" className="w-full" onClick={() => setOwnerStep(3)}>
+                      Back
+                    </Button>
                   </CardContent>
                 </Card>
+                ) : null}
               </>
             )}
           </div>

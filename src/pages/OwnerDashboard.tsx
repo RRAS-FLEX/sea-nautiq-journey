@@ -77,7 +77,8 @@ const OwnerDashboard = () => {
           <div className="container mx-auto px-4">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-                <TabsList className="grid w-full sm:w-auto grid-cols-4">
+                <TabsList className="grid w-full sm:w-auto grid-cols-5">
+                  <TabsTrigger value="bookings" className="text-xs sm:text-sm">{tl("Bookings", "Κρατήσεις")}</TabsTrigger>
                   <TabsTrigger value="overview" className="text-xs sm:text-sm">{tl("Overview", "Επισκόπηση")}</TabsTrigger>
                   <TabsTrigger value="boats" className="text-xs sm:text-sm">{tl("Boats", "Σκάφη")}</TabsTrigger>
                   <TabsTrigger value="calendar" className="text-xs sm:text-sm">{tl("Calendar", "Ημερολόγιο")}</TabsTrigger>
@@ -91,6 +92,35 @@ const OwnerDashboard = () => {
                   {tl("Add Boat", "Προσθήκη Σκάφους")}
                 </Button>
               </div>
+
+              <TabsContent value="bookings" className="space-y-6">
+                <Card className="shadow-card-hover">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Calendar className="h-5 w-5 text-aegean" />
+                      {tl("Bookings", "Κρατήσεις")}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="rounded-2xl border border-border p-4">
+                        <p className="text-sm text-muted-foreground">{tl("Total bookings", "Συνολικές κρατήσεις")}</p>
+                        <p className="text-2xl font-bold text-foreground mt-1">{stats.totalBookings}</p>
+                      </div>
+                      <div className="rounded-2xl border border-border p-4">
+                        <p className="text-sm text-muted-foreground">{tl("Revenue", "Έσοδα")}</p>
+                        <p className="text-2xl font-bold text-foreground mt-1">€{stats.totalRevenue.toLocaleString()}</p>
+                      </div>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {tl(
+                        "Detailed booking management remains available in your calendar and boat tools.",
+                        "Η αναλυτική διαχείριση κρατήσεων παραμένει διαθέσιμη στο ημερολόγιο και στα εργαλεία σκαφών.",
+                      )}
+                    </p>
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
               <TabsContent value="overview" className="space-y-6">
                 <Card className="shadow-card-hover">

@@ -1,12 +1,14 @@
-import { Star, Users, MapPin, Heart } from "lucide-react";
+import { ChevronLeft, ChevronRight, Heart, MapPin, Star, Users } from "lucide-react";
 import { motion } from "framer-motion";
 import { Link } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
 import { useFavorites } from "@/hooks/useFavorites";
 import { buildBoatDetailsPath } from "@/lib/boats";
 
 interface BoatCardProps {
   id?: string;
   image: string;
+  images?: string[];
   name: string;
   capacity: number;
   location: string;
@@ -16,9 +18,42 @@ interface BoatCardProps {
   reviewCount?: number;
 }
 
-const BoatCard = ({ id, image, name, capacity, location, pricePerDay, rating, index, reviewCount }: BoatCardProps) => {
+const BoatCard = ({ id, image, images, name, capacity, location, pricePerDay, rating, index, reviewCount }: BoatCardProps) => {
   const { isFavorite, toggleFavorite } = useFavorites();
   const favorited = id ? isFavorite(id) : false;
+  const galleryImages = useMemo(() => {
+    const candidates = [
+      ...(Array.isArray(images) ? images : []),
+      image,
+    ].filter((candidate): candidate is string => typeof candidate === "string" && candidate.trim().length > 0);
+
+    return Array.from(new Set(candidates));
+  }, [images, image]);
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
+
+  useEffect(() => {
+    setActiveImageIndex(0);
+  }, [id, image, images]);
+
+  const hasGalleryControls = galleryImages.length > 1;
+  const displayedImage = galleryImages[activeImageIndex] ?? image;
+
+  const showPreviousImage = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setActiveImageIndex((current) =>
+      current === 0 ? galleryImages.length - 1 : current - 1,
+    );
+  };
+
+  const showNextImage = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setActiveImageIndex((current) =>
+      current === galleryImages.length - 1 ? 0 : current + 1,
+    );
+  };
+
   const cardContent = (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -29,11 +64,34 @@ const BoatCard = ({ id, image, name, capacity, location, pricePerDay, rating, in
     >
       <div className="relative aspect-[4/3] overflow-hidden">
         <img
-          src={image}
+          src={displayedImage}
           alt={name}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           loading="lazy"
         />
+        {hasGalleryControls ? (
+          <>
+            <button
+              type="button"
+              aria-label="Show previous image"
+              onClick={showPreviousImage}
+              className="absolute left-3 top-1/2 -translate-y-1/2 rounded-full bg-card/90 backdrop-blur-sm p-1.5 transition-colors hover:bg-card"
+            >
+              <ChevronLeft className="h-4 w-4 text-foreground" />
+            </button>
+            <button
+              type="button"
+              aria-label="Show next image"
+              onClick={showNextImage}
+              className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full bg-card/90 backdrop-blur-sm p-1.5 transition-colors hover:bg-card"
+            >
+              <ChevronRight className="h-4 w-4 text-foreground" />
+            </button>
+            <div className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-card/90 px-2.5 py-1 text-xs font-medium text-foreground backdrop-blur-sm">
+              {activeImageIndex + 1}/{galleryImages.length}
+            </div>
+          </>
+        ) : null}
         <div className="absolute top-3 right-3 bg-card/90 backdrop-blur-sm rounded-full px-2.5 py-1 flex items-center gap-1">
           <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />
           <span className="text-xs font-semibold text-foreground">{rating}</span>

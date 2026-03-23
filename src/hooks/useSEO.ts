@@ -10,7 +10,7 @@ interface SEOOptions {
   noIndex?: boolean;
 }
 
-const BASE_TITLE = "Nautiq";
+const BASE_TITLE = "Nautiplex";
 const DEFAULT_OG_IMAGE = "https://nautiq.gr/og-image.png";
 
 const setMeta = (name: string, content: string, isProperty = false) => {
@@ -67,7 +67,7 @@ export const useSEO = ({
 
     return () => {
       // Reset to home defaults on unmount
-      document.title = "Nautiq — Boat Rentals & Sea Experiences in Greece";
+      document.title = "Nautiplex — Boat Rentals & Sea Experiences in Greece";
     };
   }, [title, description, canonical, ogImage, ogType, keywords, noIndex]);
 };

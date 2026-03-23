@@ -141,9 +141,14 @@ export type Database = {
         Row: {
           id: string;
           boat_id: string;
-          customer_id: string;
+          customer_id: string | null;
           start_date: string;
           end_date: string;
+          start_time: string | null;
+          end_time: string | null;
+          package_hours: number | null;
+          departure_time: string | null;
+          departure_marina: string | null;
           status: "pending" | "confirmed" | "completed" | "cancelled";
           total_price: number;
           created_at: string;
@@ -152,15 +157,28 @@ export type Database = {
         Insert: {
           id?: string;
           boat_id: string;
-          customer_id: string;
+          customer_id?: string | null;
           start_date: string;
           end_date: string;
+          start_time?: string | null;
+          end_time?: string | null;
+          package_hours?: number | null;
+          departure_time?: string | null;
+          departure_marina?: string | null;
           status?: "pending" | "confirmed" | "completed" | "cancelled";
           total_price: number;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
+          customer_id?: string | null;
+          start_date?: string;
+          end_date?: string;
+          start_time?: string | null;
+          end_time?: string | null;
+          package_hours?: number | null;
+          departure_time?: string | null;
+          departure_marina?: string | null;
           status?: "pending" | "confirmed" | "completed" | "cancelled";
           total_price?: number;
           updated_at?: string;
@@ -170,25 +188,34 @@ export type Database = {
         Row: {
           id: string;
           boat_id: string;
+          start_time: string | null;
+          end_time: string | null;
           date: string;
           type: "booked" | "blocked" | "maintenance";
-          guest_name?: string;
-          booking_id?: string;
-          created_at: string;
+          guest_name: string | null;
+          booking_id: string | null;
+          created_at: string | null;
         };
         Insert: {
           id?: string;
           boat_id: string;
+          start_time?: string | null;
+          end_time?: string | null;
           date: string;
           type: "booked" | "blocked" | "maintenance";
-          guest_name?: string;
-          booking_id?: string;
-          created_at?: string;
+          guest_name?: string | null;
+          booking_id?: string | null;
+          created_at?: string | null;
         };
         Update: {
+          boat_id?: string;
+          start_time?: string | null;
+          end_time?: string | null;
+          date?: string;
           type?: "booked" | "blocked" | "maintenance";
-          guest_name?: string;
-          booking_id?: string;
+          guest_name?: string | null;
+          booking_id?: string | null;
+          created_at?: string | null;
         };
       };
       admin_users: {

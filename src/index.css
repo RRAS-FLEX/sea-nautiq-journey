@@ -90,6 +90,10 @@
 
   body {
     @apply bg-background text-foreground font-body antialiased;
+    line-height: 1.5;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     background-image:
       radial-gradient(1200px circle at 0% 0%, hsl(190 45% 93% / 0.65), transparent 55%),
       radial-gradient(900px circle at 100% 10%, hsl(38 65% 94% / 0.55), transparent 50%),
@@ -97,8 +101,18 @@
     background-attachment: fixed;
   }
 
+  ::selection {
+    background: hsl(var(--aegean) / 0.22);
+    color: hsl(var(--foreground));
+  }
+
+  a {
+    transition: color 180ms ease, opacity 180ms ease;
+  }
+
   h1, h2, h3, h4, h5, h6 {
     @apply font-heading;
+    letter-spacing: -0.01em;
   }
 }
 
@@ -131,5 +145,45 @@
 
   .shadow-card-hover {
     box-shadow: 0 12px 40px -8px hsl(var(--ocean) / 0.15);
+  }
+
+  .nautiq-map-marker {
+    display: block;
+    width: 18px;
+    height: 18px;
+    border-radius: 9999px;
+    border: 3px solid hsl(var(--card));
+    background: linear-gradient(135deg, hsl(var(--aegean)), hsl(var(--turquoise)));
+    box-shadow: 0 10px 24px hsl(var(--ocean) / 0.22);
+  }
+
+  .nautiq-map-marker.is-active {
+    width: 24px;
+    height: 24px;
+    border-color: hsl(var(--card));
+    box-shadow: 0 0 0 8px hsl(var(--aegean) / 0.14), 0 14px 28px hsl(var(--ocean) / 0.26);
+  }
+
+  .leaflet-container {
+    font-family: "Inter", sans-serif;
+    background: hsl(var(--muted));
+    z-index: 1 !important;
+  }
+
+  .leaflet-map-pane { z-index: 10 !important; }
+  .leaflet-tile-pane { z-index: 11 !important; }
+  .leaflet-overlay-pane { z-index: 12 !important; }
+  .leaflet-shadow-pane { z-index: 13 !important; }
+  .leaflet-marker-pane { z-index: 14 !important; }
+  .leaflet-tooltip-pane { z-index: 15 !important; }
+  .leaflet-popup-pane { z-index: 16 !important; }
+  .leaflet-top,
+  .leaflet-bottom,
+  .leaflet-control {
+    z-index: 20 !important;
+  }
+
+  .nautiq-map-popup-card {
+    width: min(200px, calc(100vw - 110px));
   }
 }

@@ -1,9 +1,7 @@
-import destThassos from "@/assets/dest-thassos.jpg";
-import destHalkidiki from "@/assets/dest-halkidiki.jpg";
-import destMykonos from "@/assets/dest-mykonos.jpg";
-import destSantorini from "@/assets/dest-santorini.jpg";
 import { supabase } from "@/lib/supabase";
 import { resolveStorageImage } from "@/lib/storage-public";
+
+const placeholderDestinationImage = "/placeholder.svg";
 
 export interface Destination {
   id: string;
@@ -16,25 +14,58 @@ export interface Destination {
 }
 
 const DESTINATIONS_CACHE_KEY = "nautiq:destinations-cache:v2";
+const DESTINATIONS_CACHE_TTL_MS = 10 * 60 * 1000;
+const DESTINATIONS_CACHE_MAX_STALE_MS = 24 * 60 * 60 * 1000;
 
 const isBrowser = typeof window !== "undefined";
 
-const readCachedDestinations = (): Destination[] => {
-  if (!isBrowser) return [];
+type DestinationsCachePayload = {
+  updatedAt: number;
+  destinations: Destination[];
+};
+
+let destinationsInMemory: DestinationsCachePayload | null = null;
+let destinationsInFlight: Promise<Destination[]> | null = null;
+
+const isFresh = (updatedAt: number, ttlMs: number) => Date.now() - updatedAt <= ttlMs;
+
+const readCachedDestinations = (): DestinationsCachePayload | null => {
+  if (!isBrowser) return null;
   try {
     const raw = window.localStorage.getItem(DESTINATIONS_CACHE_KEY);
-    if (!raw) return [];
+    if (!raw) return null;
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as Destination[]) : [];
+
+    if (Array.isArray(parsed)) {
+      return {
+        updatedAt: 0,
+        destinations: parsed as Destination[],
+      };
+    }
+
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      Array.isArray((parsed as DestinationsCachePayload).destinations)
+    ) {
+      return parsed as DestinationsCachePayload;
+    }
+
+    return null;
   } catch {
-    return [];
+    return null;
   }
 };
 
 const writeCachedDestinations = (destinationsToCache: Destination[]) => {
   if (!isBrowser) return;
   try {
-    window.localStorage.setItem(DESTINATIONS_CACHE_KEY, JSON.stringify(destinationsToCache));
+    const payload: DestinationsCachePayload = {
+      updatedAt: Date.now(),
+      destinations: destinationsToCache,
+    };
+    window.localStorage.setItem(DESTINATIONS_CACHE_KEY, JSON.stringify(payload));
+    destinationsInMemory = payload;
   } catch {
     // Ignore cache write failures.
   }
@@ -45,7 +76,7 @@ const fallbackDestinations: Destination[] = [
     id: "thassos",
     slug: "thassos",
     name: "Thassos",
-    image: resolveStorageImage("thassos/cover.jpg", "destination-images", destThassos),
+    image: resolveStorageImage("thassos/cover.jpg", "destination-images", placeholderDestinationImage),
     boats: 24,
     description: "Crystal-clear bays, pine-lined coast, and relaxed island pacing.",
     bestFor: "Families & first-time boat trips",
@@ -54,7 +85,7 @@ const fallbackDestinations: Destination[] = [
     id: "halkidiki",
     slug: "halkidiki",
     name: "Halkidiki",
-    image: resolveStorageImage("halkidiki/cover.jpg", "destination-images", destHalkidiki),
+    image: resolveStorageImage("halkidiki/cover.jpg", "destination-images", placeholderDestinationImage),
     boats: 18,
     description: "Long beaches and scenic peninsulas with calm summer waters.",
     bestFor: "Day cruises & snorkeling",
@@ -63,7 +94,7 @@ const fallbackDestinations: Destination[] = [
     id: "mykonos",
     slug: "mykonos",
     name: "Mykonos",
-    image: resolveStorageImage("mykonos/cover.jpg", "destination-images", destMykonos),
+    image: resolveStorageImage("mykonos/cover.jpg", "destination-images", placeholderDestinationImage),
     boats: 32,
     description: "Vibrant beach culture and iconic sunset routes to nearby islands.",
     bestFor: "Groups & premium experiences",
@@ -72,7 +103,7 @@ const fallbackDestinations: Destination[] = [
     id: "santorini",
     slug: "santorini",
     name: "Santorini",
-    image: resolveStorageImage("santorini/cover.jpg", "destination-images", destSantorini),
+    image: resolveStorageImage("santorini/cover.jpg", "destination-images", placeholderDestinationImage),
     boats: 28,
     description: "Volcanic cliffs, dramatic caldera views, and signature sunset sailings.",
     bestFor: "Couples & luxury charters",
@@ -80,6 +111,20 @@ const fallbackDestinations: Destination[] = [
 ];
 
 export const getDestinations = async (): Promise<Destination[]> => {
+  if (destinationsInMemory && isFresh(destinationsInMemory.updatedAt, DESTINATIONS_CACHE_TTL_MS)) {
+    return destinationsInMemory.destinations;
+  }
+
+  const cached = readCachedDestinations();
+  if (cached && isFresh(cached.updatedAt, DESTINATIONS_CACHE_TTL_MS) && cached.destinations.length > 0) {
+    destinationsInMemory = cached;
+    return cached.destinations;
+  }
+
+  if (destinationsInFlight) {
+    return destinationsInFlight;
+  }
+
   const fetchOnce = async (): Promise<Destination[]> => {
     const { data, error } = await (supabase as any)
       .from("destinations")
@@ -92,7 +137,7 @@ export const getDestinations = async (): Promise<Destination[]> => {
     return [...data]
       .sort((a: any, b: any) => String(a?.name ?? "").localeCompare(String(b?.name ?? "")))
       .map((destination: any) => {
-      const fallbackImage = fallbackDestinations.find((item) => item.slug === destination.slug)?.image ?? destThassos;
+      const fallbackImage = fallbackDestinations.find((item) => item.slug === destination.slug)?.image ?? placeholderDestinationImage;
       const rawImages: string = destination.images?.trim() ?? "";
       const resolvedImagePath = rawImages && !/\.\w{2,5}$/.test(rawImages)
         ? `${rawImages}/1.jpg`
@@ -110,20 +155,28 @@ export const getDestinations = async (): Promise<Destination[]> => {
     });
   };
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  destinationsInFlight = (async () => {
     try {
       const loadedDestinations = await fetchOnce();
       writeCachedDestinations(loadedDestinations);
       return loadedDestinations;
     } catch {
-      if (attempt === 1) {
-        const cached = readCachedDestinations();
-        if (cached.length > 0) return cached;
+      if (cached && cached.destinations.length > 0 && isFresh(cached.updatedAt, DESTINATIONS_CACHE_MAX_STALE_MS)) {
+        destinationsInMemory = cached;
+        return cached.destinations;
       }
-    }
-  }
 
-  return fallbackDestinations;
+      if (destinationsInMemory?.destinations?.length) {
+        return destinationsInMemory.destinations;
+      }
+
+      return fallbackDestinations;
+    } finally {
+      destinationsInFlight = null;
+    }
+  })();
+
+  return destinationsInFlight;
 };
 
 export { fallbackDestinations as destinations };

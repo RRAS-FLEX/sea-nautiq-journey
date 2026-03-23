@@ -1,5 +1,5 @@
 ﻿import { supabase } from "./supabase";
-import { getPublicStorageUrl, parseStorageReference, resolveStorageImage } from "./storage-public";
+import { resolveStorageImage } from "./storage-public";
 
 export interface BoatOwner {
 	name: string;
@@ -43,27 +43,104 @@ export interface Boat {
 	revenue: number;
 }
 
+type BoatFeatureRow = {
+	feature?: string | null;
+};
+
+type BoatUserRow = {
+	name?: string | null;
+	owner_title?: string | null;
+	owner_bio?: string | null;
+	owner_languages?: string[] | null;
+	is_superhost?: boolean | null;
+	response_rate?: number | null;
+	created_at?: string | null;
+};
+
+type BoatRow = {
+	id: string;
+	name: string;
+	location: string;
+	type?: string | null;
+	length_meters?: number | null;
+	year?: number | null;
+	cruising_speed_knots?: number | null;
+	fuel_burn_litres_per_hour?: number | null;
+	capacity?: number | null;
+	departure_marina?: string | null;
+	price_per_day?: number | null;
+	rating?: number | null;
+	description?: string | null;
+	cancellation_policy?: string | null;
+	response_time?: string | null;
+	unavailable_dates?: string[] | null;
+	min_notice_hours?: number | null;
+	map_query?: string | null;
+	skipper_required?: boolean | null;
+	bookings?: number | null;
+	revenue?: number | null;
+	status?: string | null;
+	images?: string[] | string | null;
+	image?: string | null;
+	boat_features?: BoatFeatureRow[] | null;
+	users?: BoatUserRow | null;
+};
+
 const BOATS_CACHE_KEY = "nautiq:boats-cache:v3";
-const IMAGE_FILE_REGEX = /\.(avif|gif|jpe?g|png|webp|svg)$/i;
+const BOATS_CACHE_TTL_MS = 5 * 60 * 1000;
+const BOATS_CACHE_MAX_STALE_MS = 24 * 60 * 60 * 1000;
 
 const isBrowser = typeof window !== "undefined";
 
-const readCachedBoats = (): Boat[] => {
-	if (!isBrowser) return [];
+type BoatsCachePayload = {
+	updatedAt: number;
+	boats: Boat[];
+};
+
+let boatsInMemory: BoatsCachePayload | null = null;
+let boatsInFlight: Promise<Boat[]> | null = null;
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isFresh = (updatedAt: number, ttlMs: number) => Date.now() - updatedAt <= ttlMs;
+
+const readCachedBoats = (): BoatsCachePayload | null => {
+	if (!isBrowser) return null;
 	try {
 		const raw = window.localStorage.getItem(BOATS_CACHE_KEY);
-		if (!raw) return [];
+		if (!raw) return null;
 		const parsed = JSON.parse(raw);
-		return Array.isArray(parsed) ? (parsed as Boat[]) : [];
+
+		if (Array.isArray(parsed)) {
+			return {
+				updatedAt: 0,
+				boats: parsed as Boat[],
+			};
+		}
+
+		if (
+			typeof parsed === "object" &&
+			parsed !== null &&
+			Array.isArray((parsed as BoatsCachePayload).boats)
+		) {
+			return parsed as BoatsCachePayload;
+		}
+
+		return null;
 	} catch {
-		return [];
+		return null;
 	}
 };
 
 const writeCachedBoats = (boats: Boat[]) => {
 	if (!isBrowser) return;
 	try {
-		window.localStorage.setItem(BOATS_CACHE_KEY, JSON.stringify(boats));
+		const payload: BoatsCachePayload = {
+			updatedAt: Date.now(),
+			boats,
+		};
+		window.localStorage.setItem(BOATS_CACHE_KEY, JSON.stringify(payload));
+		boatsInMemory = payload;
 	} catch {
 		// Ignore cache write failures.
 	}
@@ -136,7 +213,7 @@ const normalizeImageCandidate = (value: string): string => {
 	return trimmed;
 };
 
-const getBoatImageCandidates = (row: any): string[] => {
+const getBoatImageCandidates = (row: BoatRow): string[] => {
 	const rawImages = row.images;
 	const legacyImage = row.image;
 
@@ -160,34 +237,7 @@ const getBoatImageCandidates = (row: any): string[] => {
 	return [];
 };
 
-const listFolderImages = async (folderReference: string): Promise<string[]> => {
-	const storageRef = parseStorageReference(folderReference, "boat-images");
-	if (!storageRef) return [];
-
-	const { data, error } = await supabase.storage
-		.from(storageRef.bucket)
-		.list(storageRef.path, {
-			limit: 24,
-			sortBy: { column: "name", order: "asc" },
-		});
-
-	if (error || !Array.isArray(data)) {
-		return [resolveStorageImage(`${folderReference.replace(/\/+$/, "")}/1.jpg`, "boat-images")].filter(Boolean);
-	}
-
-	const imageUrls = data
-		.filter((item) => item.name && IMAGE_FILE_REGEX.test(item.name))
-		.map((item) => getPublicStorageUrl(storageRef.bucket, `${storageRef.path}/${item.name}`))
-		.filter(Boolean);
-
-	if (imageUrls.length > 0) {
-		return imageUrls;
-	}
-
-	return [resolveStorageImage(`${folderReference.replace(/\/+$/, "")}/1.jpg`, "boat-images")].filter(Boolean);
-};
-
-const resolveBoatImages = async (row: any): Promise<string[]> => {
+const resolveBoatImages = (row: BoatRow): string[] => {
 	const imageCandidates = getBoatImageCandidates(row);
 	if (imageCandidates.length === 0) {
 		return [];
@@ -195,14 +245,14 @@ const resolveBoatImages = async (row: any): Promise<string[]> => {
 
 	const firstCandidate = imageCandidates[0];
 	if (!hasFileExtension(firstCandidate) && !/^https?:\/\//i.test(firstCandidate)) {
-		return listFolderImages(firstCandidate);
+		return [resolveStorageImage(`${firstCandidate.replace(/\/+$/, "")}/1.jpg`, "boat-images")].filter(Boolean);
 	}
 
 	return imageCandidates.map((candidate) => resolveStorageImage(candidate, "boat-images", candidate));
 };
 
-const mapRow = async (row: any): Promise<Boat> => {
-	const resolvedImages = await resolveBoatImages(row);
+const mapRow = (row: BoatRow): Boat => {
+	const resolvedImages = resolveBoatImages(row);
 
 	return {
 	id: row.id,
@@ -221,7 +271,9 @@ const mapRow = async (row: any): Promise<Boat> => {
 	pricePerDay: Number(row.price_per_day),
 	rating: Number(row.rating ?? 0),
 	description: row.description ?? "",
-	amenities: (row.boat_features ?? []).map((f: any) => f.feature),
+	amenities: (row.boat_features ?? [])
+		.map((featureRow) => featureRow.feature)
+		.filter((feature): feature is string => Boolean(feature)),
 	cancellationPolicy: row.cancellation_policy ?? "Contact owner for details",
 	responseTime: row.response_time ?? "",
 	owner: {
@@ -261,36 +313,37 @@ const isPublicBoatStatus = (status: unknown): boolean => {
 };
 
 const queryBoats = (selectClause: string) =>
-	(supabase as any)
-		.from("boats")
-		.select(selectClause);
+	supabase.from("boats").select(selectClause);
 
-const fetchBoatsFromSupabase = async () => {
+const filterBoatRowsByVisibility = (rows: BoatRow[], includeInactive = false) =>
+	includeInactive ? rows : rows.filter((row) => isPublicBoatStatus(row?.status));
+
+const fetchBoatsFromSupabase = async (includeInactive = false) => {
 	const primary = await queryBoats(BOAT_SELECT);
 	if (!primary.error) {
-		const visibleRows = (primary.data ?? []).filter((row: any) => isPublicBoatStatus(row?.status));
-		return Promise.all(visibleRows.map(mapRow));
+		const rows = filterBoatRowsByVisibility((primary.data ?? []) as unknown as BoatRow[], includeInactive);
+		return rows.map(mapRow);
 	}
 
 	const relationFallback = await queryBoats(BOAT_SELECT_FALLBACK);
 	if (!relationFallback.error) {
-		const visibleRows = (relationFallback.data ?? []).filter((row: any) => isPublicBoatStatus(row?.status));
-		return Promise.all(visibleRows.map(mapRow));
+		const rows = filterBoatRowsByVisibility((relationFallback.data ?? []) as unknown as BoatRow[], includeInactive);
+		return rows.map(mapRow);
 	}
 
 	const minimal = await queryBoats(BOAT_SELECT_MINIMAL);
 	if (!minimal.error) {
-		const visibleRows = (minimal.data ?? []).filter((row: any) => isPublicBoatStatus(row?.status));
-		return Promise.all(visibleRows.map(mapRow));
+		const rows = filterBoatRowsByVisibility((minimal.data ?? []) as unknown as BoatRow[], includeInactive);
+		return rows.map(mapRow);
 	}
 
-	const minimalWithoutStatus = await (supabase as any)
+	const minimalWithoutStatus = await supabase
 		.from("boats")
 		.select(BOAT_SELECT_MINIMAL);
 
 	if (!minimalWithoutStatus.error) {
-		const activeOrUnknown = (minimalWithoutStatus.data ?? []).filter((row: any) => isPublicBoatStatus(row?.status));
-		return Promise.all(activeOrUnknown.map(mapRow));
+		const rows = filterBoatRowsByVisibility((minimalWithoutStatus.data ?? []) as unknown as BoatRow[], includeInactive);
+		return rows.map(mapRow);
 	}
 
 	throw new Error(
@@ -303,51 +356,78 @@ const fetchBoatsFromSupabase = async () => {
 };
 
 export const getBoats = async (): Promise<Boat[]> => {
-	for (let attempt = 0; attempt < 2; attempt += 1) {
+	if (boatsInMemory && isFresh(boatsInMemory.updatedAt, BOATS_CACHE_TTL_MS)) {
+		return boatsInMemory.boats;
+	}
+
+	const cached = readCachedBoats();
+	if (cached && isFresh(cached.updatedAt, BOATS_CACHE_TTL_MS) && cached.boats.length > 0) {
+		boatsInMemory = cached;
+		return cached.boats;
+	}
+
+	if (boatsInFlight) {
+		return boatsInFlight;
+	}
+
+	boatsInFlight = (async () => {
 		try {
 			const boats = await fetchBoatsFromSupabase();
 			writeCachedBoats(boats);
 			return boats;
 		} catch {
-			if (attempt === 1) {
-				const cached = readCachedBoats();
-				if (cached.length > 0) return cached;
+			if (cached && cached.boats.length > 0 && isFresh(cached.updatedAt, BOATS_CACHE_MAX_STALE_MS)) {
+				boatsInMemory = cached;
+				return cached.boats;
 			}
-		}
-	}
 
-	return [];
+			if (boatsInMemory?.boats?.length) {
+				return boatsInMemory.boats;
+			}
+
+			return [];
+		} finally {
+			boatsInFlight = null;
+		}
+	})();
+
+	return boatsInFlight;
 };
 
 export const getBoatById = async (id: string): Promise<Boat | null> => {
-	const { data, error } = await (supabase as any)
+	const normalizedId = String(id ?? "").trim();
+	if (!UUID_REGEX.test(normalizedId)) {
+		return null;
+	}
+
+	const { data, error } = await supabase
 		.from("boats")
 		.select(BOAT_SELECT)
-		.eq("id", id)
+		.eq("id", normalizedId)
 		.maybeSingle();
 
 	if (!error && data) {
-		return mapRow(data);
+		return mapRow(data as unknown as BoatRow);
 	}
 
-	const { data: fallbackData, error: fallbackError } = await (supabase as any)
+	const { data: fallbackData, error: fallbackError } = await supabase
 		.from("boats")
 		.select(BOAT_SELECT_FALLBACK)
-		.eq("id", id)
+		.eq("id", normalizedId)
 		.maybeSingle();
 
 	if (!fallbackError && fallbackData) {
-		return mapRow(fallbackData);
+		return mapRow(fallbackData as unknown as BoatRow);
 	}
 
-	const { data: minimalData, error: minimalError } = await (supabase as any)
+	const { data: minimalData, error: minimalError } = await supabase
 		.from("boats")
 		.select(BOAT_SELECT_MINIMAL)
-		.eq("id", id)
+		.eq("id", normalizedId)
 		.maybeSingle();
 
 	if (minimalError || !minimalData) return null;
-	return mapRow(minimalData);
+	return mapRow(minimalData as unknown as BoatRow);
 };
 
 export const getBoatByPublicReference = async (reference: string): Promise<Boat | null> => {
@@ -359,6 +439,14 @@ export const getBoatByPublicReference = async (reference: string): Promise<Boat 
 	const directMatch = await getBoatById(normalizedReference);
 	if (directMatch) {
 		return directMatch;
+	}
+
+	try {
+		const allBoats = await fetchBoatsFromSupabase(true);
+		const matchedBoat = allBoats.find((boat) => isBoatReferenceMatch(boat, normalizedReference));
+		if (matchedBoat) return matchedBoat;
+	} catch {
+		// Fallback to cached/public fetch path below.
 	}
 
 	const boats = await getBoats();

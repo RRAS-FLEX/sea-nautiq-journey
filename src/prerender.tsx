@@ -13,18 +13,18 @@ const prerenderedRoutes = ["/", "/boats", "/destinations", "/about"];
 
 const getHeadTitle = (url: string) => {
   if (url === "/boats") {
-    return "Browse Boats for Rent in Greece | Nautiq";
+    return "Browse Boats for Rent in Greece | Nautiplex";
   }
 
   if (url === "/destinations") {
-    return "Greek Island Boating Destinations | Nautiq";
+    return "Greek Island Boating Destinations | Nautiplex";
   }
 
   if (url === "/about") {
-    return "About Nautiq — Greece's Trusted Boat Rental Platform";
+    return "About Nautiplex — Greece's Trusted Boat Rental Platform";
   }
 
-  return "Nautiq — Boat Rentals & Sea Experiences in Greece";
+  return "Nautiplex — Boat Rentals & Sea Experiences in Greece";
 };
 
 export async function prerender({ url }: { url: string }) {
@@ -33,7 +33,7 @@ export async function prerender({ url }: { url: string }) {
   const html = renderToString(
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <StaticRouter location={url}>
+        <StaticRouter location={url} future={{ v7_relativeSplatPath: true }}>
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/boats" element={<Boats />} />

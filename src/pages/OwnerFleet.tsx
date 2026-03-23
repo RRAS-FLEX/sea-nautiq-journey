@@ -7,10 +7,12 @@ import BoatCard from "@/components/BoatCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { OwnerFleetPageSkeleton } from "@/components/loading/LoadingUI";
 import { getBoatReviewStats } from "@/lib/reviews";
 import { getOwnerFleetBySlug } from "@/lib/owners";
 import type { Boat, BoatOwner } from "@/lib/boats";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { withRetry } from "@/lib/retry";
 
 const OwnerFleet = () => {
   const { tl } = useLanguage();
@@ -19,15 +21,44 @@ const OwnerFleet = () => {
   const [owner, setOwner] = useState<BoatOwner | undefined>(undefined);
   const [fleet, setFleet] = useState<Boat[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [reviewStatsMap, setReviewStatsMap] = useState<Record<string, { total: number; averageRating: number }>>({});
 
   useEffect(() => {
-    getOwnerFleetBySlug(ownerSlug ?? "").then(({ ownerName: n, owner: o, fleet: f }) => {
-      setOwnerName(n);
-      setOwner(o);
-      setFleet(f);
-      setIsLoading(false);
-    }).catch(() => setIsLoading(false));
+    let cancelled = false;
+
+    const loadFleet = async () => {
+      try {
+        setIsLoading(true);
+        setLoadError("");
+        const { ownerName: n, owner: o, fleet: f } = await withRetry(() => getOwnerFleetBySlug(ownerSlug ?? ""), {
+          retries: 2,
+          initialDelayMs: 220,
+        });
+
+        if (!cancelled) {
+          setOwnerName(n);
+          setOwner(o);
+          setFleet(f);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setLoadError(error instanceof Error ? error.message : "Unable to load owner fleet.");
+          setFleet([]);
+          setOwner(undefined);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadFleet();
+
+    return () => {
+      cancelled = true;
+    };
   }, [ownerSlug]);
 
   useEffect(() => {
@@ -45,9 +76,26 @@ const OwnerFleet = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="min-h-screen bg-background">
         <Navbar />
-        <p className="text-muted-foreground">Loading fleet…</p>
+        <OwnerFleetPageSkeleton />
+        <Footer />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        <main className="pt-24 pb-16">
+          <div className="container mx-auto px-4 text-center space-y-3">
+            <h1 className="text-3xl font-heading font-bold text-foreground">{tl("Could not load owner fleet", "Δεν φορτώθηκε ο στόλος ιδιοκτήτη")}</h1>
+            <p className="text-muted-foreground">{loadError}</p>
+            <Link to="/boats" className="text-aegean hover:text-turquoise">{tl("Back to boats", "Επιστροφή στα σκάφη")}</Link>
+          </div>
+        </main>
+        <Footer />
       </div>
     );
   }

@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useSEO } from "@/hooks/useSEO";
 import Navbar from "@/components/Navbar";
 import HeroSection from "@/components/HeroSection";
-import HomeValueStrip from "@/components/HomeValueStrip";
 import FeaturedBoats from "@/components/FeaturedBoats";
 import TopPackages from "@/components/TopPackages";
 import Destinations from "@/components/Destinations";
@@ -15,7 +14,7 @@ const Index = () => {
   const [searchCriteria, setSearchCriteria] = useState<BoatSearchCriteria | null>(null);
 
   useSEO({
-    title: "Nautiq — Boat Rentals & Sea Experiences in Greece",
+    title: "Nautiplex — Boat Rentals & Sea Experiences in Greece",
     description: "Book verified boats in Greece instantly — Mykonos, Santorini, Thassos, Halkidiki & more. Motor yachts, catamarans, speedboats with trusted local owners. Best prices, no hidden fees.",
     canonical: "https://nautiq.gr/",
     keywords: "boat rental Greece, rent a boat Greece, yacht charter Greece, Greek islands sailing, sea experiences Greece",
@@ -32,7 +31,6 @@ const Index = () => {
 
       <>
         <HeroSection onFindBoats={handleFindBoats} />
-        <HomeValueStrip />
         <FeaturedBoats searchCriteria={searchCriteria} />
         <TopPackages />
         <Destinations />

@@ -21,7 +21,23 @@ export interface ReviewDraftInput {
   tripDate: string;
 }
 
-const mapReview = (review: any): BoatReview => ({
+type ReviewRow = {
+  id: string;
+  boat_id: string;
+  customer_name?: string | null;
+  rating?: number | null;
+  title?: string | null;
+  comment?: string | null;
+  trip_date?: string | null;
+  created_at: string;
+};
+
+type ReviewStatsRow = {
+  boat_id: string;
+  rating?: number | null;
+};
+
+const mapReview = (review: ReviewRow): BoatReview => ({
   id: review.id,
   boatId: review.boat_id,
   customerName: review.customer_name ?? "Guest",
@@ -33,15 +49,15 @@ const mapReview = (review: any): BoatReview => ({
 });
 
 export const getAllReviews = async (): Promise<BoatReview[]> => {
-  const { data, error } = await (supabase as any).from("reviews").select("*").order("created_at", { ascending: false });
+  const { data, error } = await supabase.from("reviews").select("*").order("created_at", { ascending: false });
   if (error) {
     throw new Error(error.message || "Failed to load reviews");
   }
-  return Array.isArray(data) ? data.map(mapReview) : [];
+  return Array.isArray(data) ? (data as ReviewRow[]).map(mapReview) : [];
 };
 
 export const getBoatReviews = async (boatId: string): Promise<BoatReview[]> => {
-  const { data, error } = await (supabase as any)
+  const { data, error } = await supabase
     .from("reviews")
     .select("*")
     .eq("boat_id", boatId)
@@ -51,20 +67,50 @@ export const getBoatReviews = async (boatId: string): Promise<BoatReview[]> => {
     throw new Error(error.message || "Failed to load boat reviews");
   }
 
-  return Array.isArray(data) ? data.map(mapReview) : [];
+  return Array.isArray(data) ? (data as ReviewRow[]).map(mapReview) : [];
+};
+
+export const getBoatReviewStatsMap = async (boatIds: string[]) => {
+  const uniqueBoatIds = Array.from(new Set(boatIds.filter(Boolean)));
+  if (uniqueBoatIds.length === 0) {
+    return {} as Record<string, { total: number; averageRating: number }>;
+  }
+
+  const { data, error } = await supabase
+    .from("reviews")
+    .select("boat_id, rating")
+    .in("boat_id", uniqueBoatIds);
+
+  if (error) {
+    throw new Error(error.message || "Failed to load review stats");
+  }
+
+  const accumulator: Record<string, { total: number; ratingSum: number }> = {};
+  for (const boatId of uniqueBoatIds) {
+    accumulator[boatId] = { total: 0, ratingSum: 0 };
+  }
+
+  for (const row of (data ?? []) as ReviewStatsRow[]) {
+    const bucket = accumulator[row.boat_id] ?? { total: 0, ratingSum: 0 };
+    bucket.total += 1;
+    bucket.ratingSum += Number(row.rating ?? 0);
+    accumulator[row.boat_id] = bucket;
+  }
+
+  const statsMap: Record<string, { total: number; averageRating: number }> = {};
+  for (const [boatId, value] of Object.entries(accumulator)) {
+    statsMap[boatId] = {
+      total: value.total,
+      averageRating: value.total > 0 ? value.ratingSum / value.total : 0,
+    };
+  }
+
+  return statsMap;
 };
 
 export const getBoatReviewStats = async (boatId: string) => {
-  const reviews = await getBoatReviews(boatId);
-  const total = reviews.length;
-  const averageRating = total > 0
-    ? reviews.reduce((sum, review) => sum + review.rating, 0) / total
-    : 0;
-
-  return {
-    total,
-    averageRating,
-  };
+  const statsMap = await getBoatReviewStatsMap([boatId]);
+  return statsMap[boatId] ?? { total: 0, averageRating: 0 };
 };
 
 export const addBoatReview = async (input: ReviewDraftInput): Promise<BoatReview> => {
@@ -91,5 +137,5 @@ export const addBoatReview = async (input: ReviewDraftInput): Promise<BoatReview
     throw new Error(error?.message || "Failed to submit review");
   }
 
-  return mapReview(data);
+  return mapReview(data as ReviewRow);
 };

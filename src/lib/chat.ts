@@ -15,8 +15,21 @@ export interface ChatThread {
   boatId: string;
   boatName: string;
   ownerName: string;
+  customerId: string;
+  customerName: string;
   messages: ChatMessage[];
   lastUpdatedAt: string;
+}
+
+export interface ChatThreadSummary {
+  id: string;
+  boatId: string;
+  boatName: string;
+  ownerName: string;
+  customerId: string;
+  customerName: string;
+  lastUpdatedAt: string;
+  lastMessageText: string;
 }
 
 const toReadableChatError = (error: any, fallback: string) => {
@@ -34,7 +47,7 @@ const toReadableChatError = (error: any, fallback: string) => {
   return message || fallback;
 };
 
-const getCustomerSession = async () => {
+const getSignedInSession = async () => {
   const {
     data: { session },
   } = await supabase.auth.getSession();
@@ -64,7 +77,6 @@ const ensureCustomerProfile = async (session: { user: any }) => {
         id: session.user.id,
         email,
         name: fallbackName,
-        is_owner: false,
       },
       { onConflict: "id" },
     );
@@ -82,12 +94,54 @@ const mapMessage = (message: any): ChatMessage => ({
   createdAt: message.created_at,
 });
 
+const getOwnerBoatMap = async (ownerId: string) => {
+  const { data: boats, error } = await (supabase as any)
+    .from("boats")
+    .select("id, owner_id")
+    .eq("owner_id", ownerId);
+
+  if (error) {
+    throw new Error(toReadableChatError(error, "Failed to load owner boats"));
+  }
+
+  const rows = Array.isArray(boats) ? boats : [];
+  return new Set(rows.map((boat) => String(boat.id)));
+};
+
+const getCustomerNameMap = async (customerIds: string[]) => {
+  if (customerIds.length === 0) {
+    return new Map<string, string>();
+  }
+
+  const { data, error } = await (supabase as any)
+    .from("users")
+    .select("id, name")
+    .in("id", customerIds);
+
+  if (error) {
+    return new Map<string, string>();
+  }
+
+  const map = new Map<string, string>();
+  for (const row of Array.isArray(data) ? data : []) {
+    map.set(String(row.id), String(row.name ?? "Customer"));
+  }
+  return map;
+};
+
+const ensureOwnerCanAccessThread = async (userId: string, boatId: string) => {
+  const ownerBoatIds = await getOwnerBoatMap(userId);
+  if (!ownerBoatIds.has(String(boatId))) {
+    throw new Error("You can only access conversations for boats you own.");
+  }
+};
+
 export const getOrCreateThread = async (boatId: string, boatName: string, ownerName: string): Promise<ChatThread> => {
   if (!boatId?.trim()) {
     throw new Error("Missing boat context. Open chat from a boat profile.");
   }
 
-  const session = await getCustomerSession();
+  const session = await getSignedInSession();
   await ensureCustomerProfile(session);
   const threadsTable = (supabase as any).from("chat_threads");
   const messagesTable = (supabase as any).from("chat_messages");
@@ -140,26 +194,148 @@ export const getOrCreateThread = async (boatId: string, boatName: string, ownerN
     boatId: thread.boat_id,
     boatName: thread.boat_name,
     ownerName: thread.owner_name,
+    customerId: thread.customer_id,
+    customerName: session.user.user_metadata?.name || session.user.email?.split("@")[0] || "Customer",
     messages: Array.isArray(messageRows) ? messageRows.map(mapMessage) : [],
     lastUpdatedAt: thread.last_updated_at,
   };
 };
 
-export const addMessage = async (boatId: string, sender: MessageSender, text: string): Promise<ChatMessage> => {
-  if (!boatId?.trim()) {
-    throw new Error("Missing boat context. Open chat from a boat profile.");
+export const getThreadById = async (threadId: string): Promise<ChatThread> => {
+  if (!threadId?.trim()) {
+    throw new Error("Missing chat thread context.");
   }
 
-  const session = await getCustomerSession();
-  await ensureCustomerProfile(session);
-  const thread = await getOrCreateThread(boatId, "Boat", "Owner");
+  const session = await getSignedInSession();
+  const { data: thread, error: threadError } = await (supabase as any)
+    .from("chat_threads")
+    .select("*")
+    .eq("id", threadId)
+    .single();
+
+  if (threadError || !thread) {
+    throw new Error(toReadableChatError(threadError, "Failed to load chat thread"));
+  }
+
+  const isCustomer = String(thread.customer_id) === session.user.id;
+  if (!isCustomer) {
+    await ensureOwnerCanAccessThread(session.user.id, thread.boat_id);
+  }
+
+  const { data: messageRows, error: messageError } = await (supabase as any)
+    .from("chat_messages")
+    .select("*")
+    .eq("thread_id", thread.id)
+    .order("created_at", { ascending: true });
+
+  if (messageError) {
+    throw new Error(toReadableChatError(messageError, "Failed to load chat messages"));
+  }
+
+  const customerNameMap = await getCustomerNameMap([String(thread.customer_id)]);
+
+  return {
+    id: thread.id,
+    boatId: thread.boat_id,
+    boatName: thread.boat_name,
+    ownerName: thread.owner_name,
+    customerId: thread.customer_id,
+    customerName: customerNameMap.get(String(thread.customer_id)) || "Customer",
+    messages: Array.isArray(messageRows) ? messageRows.map(mapMessage) : [],
+    lastUpdatedAt: thread.last_updated_at,
+  };
+};
+
+export const getOwnerThreads = async (): Promise<ChatThreadSummary[]> => {
+  const session = await getSignedInSession();
+  const ownerBoatIds = await getOwnerBoatMap(session.user.id);
+  const boatIds = [...ownerBoatIds];
+
+  if (boatIds.length === 0) {
+    return [];
+  }
+
+  const { data: threadRows, error: threadError } = await (supabase as any)
+    .from("chat_threads")
+    .select("id, boat_id, boat_name, owner_name, customer_id, last_updated_at")
+    .in("boat_id", boatIds)
+    .order("last_updated_at", { ascending: false });
+
+  if (threadError) {
+    throw new Error(toReadableChatError(threadError, "Failed to load owner chats"));
+  }
+
+  const threads = Array.isArray(threadRows) ? threadRows : [];
+  if (threads.length === 0) {
+    return [];
+  }
+
+  const threadIds = threads.map((thread) => String(thread.id));
+  const customerIds = [...new Set(threads.map((thread) => String(thread.customer_id)).filter(Boolean))];
+  const customerNameMap = await getCustomerNameMap(customerIds);
+
+  const { data: messageRows } = await (supabase as any)
+    .from("chat_messages")
+    .select("thread_id, text, created_at")
+    .in("thread_id", threadIds)
+    .order("created_at", { ascending: false });
+
+  const latestByThread = new Map<string, string>();
+  for (const message of Array.isArray(messageRows) ? messageRows : []) {
+    const threadId = String(message.thread_id);
+    if (!latestByThread.has(threadId)) {
+      latestByThread.set(threadId, String(message.text ?? ""));
+    }
+  }
+
+  return threads.map((thread) => ({
+    id: String(thread.id),
+    boatId: String(thread.boat_id),
+    boatName: String(thread.boat_name ?? "Boat"),
+    ownerName: String(thread.owner_name ?? "Owner"),
+    customerId: String(thread.customer_id),
+    customerName: customerNameMap.get(String(thread.customer_id)) || "Customer",
+    lastUpdatedAt: String(thread.last_updated_at ?? new Date().toISOString()),
+    lastMessageText: latestByThread.get(String(thread.id)) || "",
+  }));
+};
+
+export const addMessageToThread = async (
+  threadId: string,
+  sender: MessageSender,
+  text: string,
+): Promise<ChatMessage> => {
+  if (!threadId?.trim()) {
+    throw new Error("Missing chat thread context.");
+  }
+
+  const session = await getSignedInSession();
+  const { data: thread, error: threadError } = await (supabase as any)
+    .from("chat_threads")
+    .select("id, boat_id, customer_id")
+    .eq("id", threadId)
+    .single();
+
+  if (threadError || !thread) {
+    throw new Error(toReadableChatError(threadError, "Failed to load chat thread"));
+  }
+
+  if (sender === "customer") {
+    if (String(thread.customer_id) !== session.user.id) {
+      throw new Error("You can only send customer messages in your own conversations.");
+    }
+    await ensureCustomerProfile(session);
+  } else {
+    await ensureOwnerCanAccessThread(session.user.id, thread.boat_id);
+  }
+
   const { data, error } = await (supabase as any)
     .from("chat_messages")
     .insert({
       thread_id: thread.id,
-      boat_id: boatId,
+      boat_id: thread.boat_id,
       sender_role: sender,
-      sender_user_id: sender === "customer" ? session.user.id : null,
+      sender_user_id: session.user.id,
       text: text.trim(),
     })
     .select()
@@ -167,48 +343,6 @@ export const addMessage = async (boatId: string, sender: MessageSender, text: st
 
   if (error || !data) {
     throw new Error(toReadableChatError(error, "Failed to send message"));
-  }
-
-  await (supabase as any).from("chat_threads").update({ last_updated_at: data.created_at }).eq("id", thread.id);
-  return mapMessage(data);
-};
-
-// Canned auto-reply pool the simulated owner picks from
-const ownerReplies = [
-  "Thanks for reaching out! I'll confirm your preferred date as soon as possible.",
-  "Great question! Feel free to ask about any specific stops or routes you'd like.",
-  "Absolutely, we can accommodate that. Let me know your group size and I'll sort it out.",
-  "The boat is fully equipped for that type of trip — sunscreen and drinks are on us!",
-  "I'll check the calendar and get back to you with an available slot very shortly.",
-  "Happy to help. What time of day works best for your group?",
-  "That bay is one of my favourites too — great choice!",
-];
-
-export const simulateOwnerReply = (boatId: string): ChatMessage => {
-  throw new Error("Use the async simulateOwnerReply flow.");
-};
-
-export const simulateOwnerReplyAsync = async (boatId: string): Promise<ChatMessage> => {
-  if (!boatId?.trim()) {
-    throw new Error("Missing boat context. Open chat from a boat profile.");
-  }
-
-  const text = ownerReplies[Math.floor(Math.random() * ownerReplies.length)];
-  const thread = await getOrCreateThread(boatId, "Boat", "Owner");
-  const { data, error } = await (supabase as any)
-    .from("chat_messages")
-    .insert({
-      thread_id: thread.id,
-      boat_id: boatId,
-      sender_role: "owner",
-      sender_user_id: null,
-      text,
-    })
-    .select()
-    .single();
-
-  if (error || !data) {
-    throw new Error(toReadableChatError(error, "Failed to simulate owner reply"));
   }
 
   await (supabase as any).from("chat_threads").update({ last_updated_at: data.created_at }).eq("id", thread.id);

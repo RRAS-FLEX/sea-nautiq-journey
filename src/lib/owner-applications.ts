@@ -14,6 +14,11 @@ export interface OwnerApplicationInput {
   operatingSeason: string;
   // Online presence
   website: string;
+  // Payout readiness
+  bankAccountHolder: string;
+  iban: string;
+  bankName: string;
+  stripeAccountId: string;
   // Notes
   notes: string;
 }
@@ -98,6 +103,10 @@ export const submitOwnerApplication = async (input: OwnerApplicationInput): Prom
     `Boat types: ${input.boatTypes.length > 0 ? input.boatTypes.join(", ") : "Not specified"}`,
     `Boats to list: ${input.boatCount.trim()}`,
     `Operating season: ${input.operatingSeason.trim()}`,
+    `Bank account holder: ${input.bankAccountHolder.trim()}`,
+    `IBAN: ${input.iban.trim()}`,
+    input.bankName.trim() ? `Bank name: ${input.bankName.trim()}` : null,
+    input.stripeAccountId.trim() ? `Stripe account id: ${input.stripeAccountId.trim()}` : null,
     input.website.trim() ? `Website / social: ${input.website.trim()}` : null,
     `Notes: ${input.notes.trim() || "No extra notes provided."}`,
   ]

@@ -9,6 +9,47 @@ export interface AuthUser {
   isOwner: boolean;
 }
 
+const AUTH_USER_CACHE_KEY = "nautiplex.auth.user";
+
+const readCachedAuthUser = (): AuthUser | null => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(AUTH_USER_CACHE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<AuthUser>;
+    if (!parsed?.id || !parsed?.email || !parsed?.name) {
+      return null;
+    }
+
+    return {
+      id: String(parsed.id),
+      email: String(parsed.email),
+      name: String(parsed.name),
+      isOwner: Boolean(parsed.isOwner),
+    };
+  } catch {
+    return null;
+  }
+};
+
+const writeCachedAuthUser = (authUser: AuthUser | null) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (!authUser) {
+    window.localStorage.removeItem(AUTH_USER_CACHE_KEY);
+    return;
+  }
+
+  window.localStorage.setItem(AUTH_USER_CACHE_KEY, JSON.stringify(authUser));
+};
+
 const toReadableAuthError = (message?: string) => {
   const normalizedMessage = message?.trim().toLowerCase() ?? "";
 
@@ -75,7 +116,6 @@ const ensureUserProfile = async (user: User, fallbackName?: string): Promise<Dat
         id: user.id,
         email,
         name: buildProfileName(user, fallbackName),
-        is_owner: false,
       },
       { onConflict: "id" }
     )
@@ -120,7 +160,9 @@ export const signUpWithEmail = async (
   }
 
   const profile = await ensureUserProfile(authData.user, normalizedName);
-  return mapProfileToAuthUser(profile);
+  const authUser = mapProfileToAuthUser(profile);
+  writeCachedAuthUser(authUser);
+  return authUser;
 };
 
 export const signInWithGoogle = async (redirectTo?: string): Promise<void> => {
@@ -164,13 +206,23 @@ export const signInWithEmail = async (
   if (userError || !userData) {
     try {
       const profile = await ensureUserProfile(data.user);
-      return mapProfileToAuthUser(profile);
+      const authUser = mapProfileToAuthUser(profile);
+      writeCachedAuthUser(authUser);
+      return authUser;
     } catch {
-      return mapSessionToAuthUser(data.user);
+      const sessionFallback = mapSessionToAuthUser(data.user);
+      const cachedUser = readCachedAuthUser();
+      const resolved = cachedUser && cachedUser.id === sessionFallback.id
+        ? { ...sessionFallback, isOwner: cachedUser.isOwner }
+        : sessionFallback;
+      writeCachedAuthUser(resolved);
+      return resolved;
     }
   }
 
-  return mapProfileToAuthUser(userData);
+  const authUser = mapProfileToAuthUser(userData);
+  writeCachedAuthUser(authUser);
+  return authUser;
 };
 
 /**
@@ -199,13 +251,22 @@ export const getSessionUser = async (): Promise<AuthUser | null> => {
   if (userError || !userData) {
     try {
       const profile = await ensureUserProfile(session.user);
-      return mapProfileToAuthUser(profile);
+      const authUser = mapProfileToAuthUser(profile);
+      writeCachedAuthUser(authUser);
+      return authUser;
     } catch {
-      return sessionFallback;
+      const cachedUser = readCachedAuthUser();
+      const resolved = cachedUser && cachedUser.id === sessionFallback.id
+        ? { ...sessionFallback, isOwner: cachedUser.isOwner }
+        : sessionFallback;
+      writeCachedAuthUser(resolved);
+      return resolved;
     }
   }
 
-  return mapProfileToAuthUser(userData);
+  const authUser = mapProfileToAuthUser(userData);
+  writeCachedAuthUser(authUser);
+  return authUser;
 };
 
 /**
@@ -216,6 +277,8 @@ export const signOut = async (): Promise<void> => {
   if (error) {
     throw new Error(error.message || "Failed to sign out");
   }
+
+  writeCachedAuthUser(null);
 };
 
 /**

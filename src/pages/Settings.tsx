@@ -6,9 +6,11 @@ import Footer from "@/components/Footer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { supabase } from "@/lib/supabase";
 
 type SettingsState = {
   profilePublic: boolean;
@@ -37,6 +39,13 @@ const Settings = () => {
   const { toast } = useToast();
   const [settings, setSettings] = useState<SettingsState>(defaultSettings);
   const [savedSnapshot, setSavedSnapshot] = useState<string>(JSON.stringify(defaultSettings()));
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [mfaBusy, setMfaBusy] = useState(false);
+  const [mfaChallengeId, setMfaChallengeId] = useState<string | null>(null);
+  const [mfaFactorId, setMfaFactorId] = useState<string | null>(null);
+  const [mfaQrCode, setMfaQrCode] = useState<string>("");
+  const [mfaOtpUri, setMfaOtpUri] = useState<string>("");
+  const [mfaCode, setMfaCode] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -60,6 +69,27 @@ const Settings = () => {
       setSettings(defaultSettings());
       setSavedSnapshot(JSON.stringify(defaultSettings()));
     }
+  }, []);
+
+  const refreshMfaStatus = async () => {
+    try {
+      const { data, error } = await supabase.auth.mfa.listFactors();
+      if (error) {
+        throw error;
+      }
+
+      const allFactors = data?.all ?? [];
+      const hasVerified = allFactors.some((factor) => factor.status === "verified");
+      setMfaEnabled(hasVerified);
+      setSettings((current) => ({ ...current, twoFactorEnabled: hasVerified }));
+    } catch {
+      setMfaEnabled(false);
+      setSettings((current) => ({ ...current, twoFactorEnabled: false }));
+    }
+  };
+
+  useEffect(() => {
+    refreshMfaStatus();
   }, []);
 
   const isDirty = useMemo(() => JSON.stringify(settings) !== savedSnapshot, [savedSnapshot, settings]);
@@ -98,6 +128,100 @@ const Settings = () => {
       description: tl("This action will be available in the next update.", "Αυτή η ενέργεια θα είναι διαθέσιμη στην επόμενη ενημέρωση."),
     });
   };
+
+  const handleEnableMfa = async () => {
+    setMfaBusy(true);
+    try {
+      const { data: enrollData, error: enrollError } = await supabase.auth.mfa.enroll({ factorType: "totp" });
+      if (enrollError || !enrollData?.id) {
+        throw enrollError ?? new Error("MFA enrollment could not start");
+      }
+
+      const { data: challengeData, error: challengeError } = await supabase.auth.mfa.challenge({ factorId: enrollData.id });
+      if (challengeError || !challengeData?.id) {
+        throw challengeError ?? new Error("MFA challenge could not start");
+      }
+
+      setMfaFactorId(enrollData.id);
+      setMfaChallengeId(challengeData.id);
+      setMfaQrCode(enrollData.totp.qr_code ?? "");
+      setMfaOtpUri(enrollData.totp.uri ?? "");
+      setMfaCode("");
+
+      toast({
+        title: tl("MFA setup started", "Η ρύθμιση MFA ξεκίνησε"),
+        description: tl("Scan the QR code in your authenticator app, then enter the 6-digit code.", "Σκάναρε το QR code στην εφαρμογή authenticator και μετά εισήγαγε τον 6-ψήφιο κωδικό."),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to start MFA setup";
+      toast({
+        title: tl("Could not start MFA", "Δεν ήταν δυνατή η εκκίνηση MFA"),
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const handleVerifyMfa = async () => {
+    const trimmedCode = mfaCode.trim();
+    if (!mfaFactorId || !mfaChallengeId || trimmedCode.length !== 6) {
+      toast({
+        title: tl("Invalid verification code", "Μη έγκυρος κωδικός επαλήθευσης"),
+        description: tl("Enter the 6-digit code from your authenticator app.", "Εισήγαγε τον 6-ψήφιο κωδικό από την εφαρμογή authenticator."),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setMfaBusy(true);
+    try {
+      const { error } = await supabase.auth.mfa.verify({
+        factorId: mfaFactorId,
+        challengeId: mfaChallengeId,
+        code: trimmedCode,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setMfaChallengeId(null);
+      setMfaFactorId(null);
+      setMfaQrCode("");
+      setMfaOtpUri("");
+      setMfaCode("");
+      await refreshMfaStatus();
+
+      toast({
+        title: tl("MFA enabled", "Το MFA ενεργοποιήθηκε"),
+        description: tl("Your account now has verified multi-factor authentication.", "Ο λογαριασμός σου έχει πλέον επαληθευμένο έλεγχο ταυτότητας πολλαπλών παραγόντων."),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "MFA verification failed";
+      toast({
+        title: tl("MFA verification failed", "Η επαλήθευση MFA απέτυχε"),
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const mfaQrImageSrc = useMemo(() => {
+    if (!mfaQrCode) {
+      return "";
+    }
+    if (mfaQrCode.startsWith("data:image")) {
+      return mfaQrCode;
+    }
+    if (mfaQrCode.trim().startsWith("<svg")) {
+      return `data:image/svg+xml;utf8,${encodeURIComponent(mfaQrCode)}`;
+    }
+    return "";
+  }, [mfaQrCode]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -173,8 +297,42 @@ const Settings = () => {
                     <p className="text-sm text-foreground">{tl("Two-factor authentication", "Έλεγχος ταυτότητας δύο παραγόντων")}</p>
                     <p className="text-xs text-muted-foreground">{tl("Add an extra verification step for sign in.", "Πρόσθεσε επιπλέον βήμα επαλήθευσης για σύνδεση.")}</p>
                   </div>
-                  <Switch checked={settings.twoFactorEnabled} onCheckedChange={(checked) => updateSetting("twoFactorEnabled", checked)} />
+                  <Switch checked={mfaEnabled} disabled />
                 </div>
+                {!mfaEnabled ? (
+                  <div className="rounded-xl border border-border p-4 space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      {tl("Required for owner/admin write actions. Enable and verify MFA to continue.", "Απαιτείται για εγγραφή ενεργειών owner/admin. Ενεργοποίησε και επαλήθευσε MFA για συνέχεια.")}
+                    </p>
+                    {!mfaChallengeId ? (
+                      <Button className="w-full bg-gradient-accent text-accent-foreground" onClick={handleEnableMfa} disabled={mfaBusy}>
+                        {mfaBusy ? tl("Starting setup...", "Εκκίνηση ρύθμισης...") : tl("Enable MFA now", "Ενεργοποίηση MFA τώρα")}
+                      </Button>
+                    ) : (
+                      <div className="space-y-3">
+                        {mfaQrImageSrc ? (
+                          <img src={mfaQrImageSrc} alt="MFA QR code" className="mx-auto h-44 w-44 rounded-md border border-border bg-white p-2" />
+                        ) : null}
+                        {mfaOtpUri ? (
+                          <Input value={mfaOtpUri} readOnly className="text-xs" />
+                        ) : null}
+                        <Input
+                          value={mfaCode}
+                          onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                          placeholder={tl("Enter 6-digit code", "Εισήγαγε 6-ψήφιο κωδικό")}
+                          inputMode="numeric"
+                        />
+                        <Button className="w-full" onClick={handleVerifyMfa} disabled={mfaBusy || mfaCode.trim().length !== 6}>
+                          {mfaBusy ? tl("Verifying...", "Επαλήθευση...") : tl("Verify and enable", "Επαλήθευση και ενεργοποίηση")}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-border p-4">
+                    <p className="text-xs text-emerald-600">{tl("MFA is verified and active for your account.", "Το MFA είναι επαληθευμένο και ενεργό για τον λογαριασμό σου.")}</p>
+                  </div>
+                )}
                 <div className="rounded-xl border border-border p-4 flex items-center justify-between">
                   <div>
                     <p className="text-sm text-foreground">{tl("Login alerts", "Ειδοποιήσεις σύνδεσης")}</p>

@@ -1,40 +1,50 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { LanguageProvider } from "@/contexts/LanguageContext";
+import { RoutingDataProvider } from "@/contexts/RoutingDataContext";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Navbar from "@/components/Navbar";
+import AppErrorBoundary from "@/components/AppErrorBoundary";
+import SupportChat from "@/components/SupportChat";
+import { RouteTransitionLoader } from "@/components/loading/LoadingUI";
+import ConnectionStatusBanner from "@/components/ConnectionStatusBanner";
 import { trackPageView } from "@/lib/analytics";
 import { isGoogleClientIdUsable, sanitizeGoogleClientId } from "@/lib/google-oauth";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import Index from "./pages/Index.tsx";
-import Boats from "./pages/Boats.tsx";
-import BoatDetails from "./pages/BoatDetails.tsx";
-import DestinationsPage from "./pages/DestinationsPage.tsx";
-import About from "./pages/About.tsx";
-import OwnerProfile from "./pages/OwnerProfile.tsx";
-import OwnerDashboard from "./pages/OwnerDashboard.tsx";
-import CustomerProfile from "./pages/CustomerProfile.tsx";
-import ContactOwner from "./pages/ContactOwner.tsx";
-import Booking from "./pages/Booking.tsx";
-import Chat from "./pages/Chat.tsx";
-import History from "./pages/History.tsx";
-import OwnerFleet from "./pages/OwnerFleet.tsx";
-import BecomeOwner from "./pages/BecomeOwner.tsx";
-import Favorites from "./pages/Favorites.tsx";
-import Settings from "./pages/Settings.tsx";
-import PostTripReview from "./pages/PostTripReview.tsx";
-import BusinessPromotions from "./pages/BusinessPromotions.tsx";
-import PrivacyPolicy from "./pages/PrivacyPolicy.tsx";
-import TermsOfService from "./pages/TermsOfService.tsx";
-import CookiePolicy from "./pages/CookiePolicy.tsx";
-import RefundPolicy from "./pages/RefundPolicy.tsx";
-import BoatOwnerAgreement from "./pages/BoatOwnerAgreement.tsx";
-import NotFound from "./pages/NotFound.tsx";
+
+const Index = lazy(() => import("./pages/Index.tsx"));
+const Boats = lazy(() => import("./pages/Boats.tsx"));
+const BoatsMap = lazy(() => import("./pages/BoatsMap.tsx"));
+const BoatDetails = lazy(() => import("./pages/BoatDetails.tsx"));
+const DestinationsPage = lazy(() => import("./pages/DestinationsPage.tsx"));
+const About = lazy(() => import("./pages/About.tsx"));
+const OwnerProfile = lazy(() => import("./pages/OwnerProfile.tsx"));
+const OwnerDashboard = lazy(() => import("./pages/OwnerDashboard.tsx"));
+const CustomerProfile = lazy(() => import("./pages/CustomerProfile.tsx"));
+const ContactOwner = lazy(() => import("./pages/ContactOwner.tsx"));
+const Booking = lazy(() => import("./pages/Booking.tsx"));
+const BookingClosed = lazy(() => import("./pages/BookingClosed.tsx"));
+const BookingConfirmed = lazy(() => import("./pages/BookingConfirmed.tsx"));
+const Chat = lazy(() => import("./pages/Chat.tsx"));
+const History = lazy(() => import("./pages/History.tsx"));
+const OwnerFleet = lazy(() => import("./pages/OwnerFleet.tsx"));
+const BecomeOwner = lazy(() => import("./pages/BecomeOwner.tsx"));
+const Favorites = lazy(() => import("./pages/Favorites.tsx"));
+const Settings = lazy(() => import("./pages/Settings.tsx"));
+const PostTripReview = lazy(() => import("./pages/PostTripReview.tsx"));
+const BusinessPromotions = lazy(() => import("./pages/BusinessPromotions.tsx"));
+const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy.tsx"));
+const TermsOfService = lazy(() => import("./pages/TermsOfService.tsx"));
+const CookiePolicy = lazy(() => import("./pages/CookiePolicy.tsx"));
+const RefundPolicy = lazy(() => import("./pages/RefundPolicy.tsx"));
+const BoatOwnerAgreement = lazy(() => import("./pages/BoatOwnerAgreement.tsx"));
+const ReportIssue = lazy(() => import("./pages/ReportIssue.tsx"));
+const NotFound = lazy(() => import("./pages/NotFound.tsx"));
 
 const queryClient = new QueryClient();
 const googleClientId = sanitizeGoogleClientId(import.meta.env.VITE_GOOGLE_CLIENT_ID);
@@ -60,6 +70,17 @@ const RoleLoadingScreen = () => (
     <main className="pt-24">
       <div className="container mx-auto px-4">
         <p className="text-sm text-muted-foreground">Checking account role...</p>
+      </div>
+    </main>
+  </div>
+);
+
+const RoutePageFallback = () => (
+  <div className="min-h-screen bg-background">
+    <Navbar />
+    <main className="pt-24">
+      <div className="container mx-auto px-4">
+        <p className="text-sm text-muted-foreground">Loading page…</p>
       </div>
     </main>
   </div>
@@ -158,38 +179,48 @@ const OwnerRoute = ({ children }: { children: JSX.Element }) => {
 };
 
 const AppRoutes = () => (
-  <BrowserRouter>
+  <BrowserRouter future={{ v7_relativeSplatPath: true }}>
+    <RouteTransitionLoader />
+    <ConnectionStatusBanner />
     <RouteAnalyticsTracker />
-    <Routes>
-      <Route path="/" element={<Index />} />
-      <Route path="/boats" element={<Boats />} />
-      <Route path="/boats/:boatRef" element={<BoatDetails />} />
-      <Route path="/destinations" element={<DestinationsPage />} />
-      <Route path="/about" element={<About />} />
-      <Route path="/owner-profile" element={<OwnerRoute><OwnerProfile /></OwnerRoute>} />
-      <Route path="/owner-dashboard" element={<OwnerRoute><OwnerDashboard /></OwnerRoute>} />
-      <Route path="/owners/:ownerSlug" element={<OwnerFleet />} />
-      <Route path="/portal" element={<RoleRouter />} />
-      <Route path="/profile" element={<RoleRouter />} />
-      <Route path="/admin" element={<Navigate to="/portal" replace />} />
-      <Route path="/settings" element={<Settings />} />
-      <Route path="/customer-profile" element={<CustomerRoute><CustomerProfile /></CustomerRoute>} />
-      <Route path="/history" element={<History />} />
-      <Route path="/contact-owner" element={<ContactOwner />} />
-      <Route path="/booking" element={<Booking />} />
-      <Route path="/chat" element={<Chat />} />
-      <Route path="/become-owner" element={<BecomeOwner />} />
-      <Route path="/favorites" element={<Favorites />} />
-      <Route path="/post-trip-review" element={<PostTripReview />} />
-      <Route path="/business-promotions" element={<BusinessPromotions />} />
-      <Route path="/privacy-policy" element={<PrivacyPolicy />} />
-      <Route path="/terms-of-service" element={<TermsOfService />} />
-      <Route path="/cookie-policy" element={<CookiePolicy />} />
-      <Route path="/refund-policy" element={<RefundPolicy />} />
-      <Route path="/boat-owner-agreement" element={<BoatOwnerAgreement />} />
-      {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-      <Route path="*" element={<NotFound />} />
-    </Routes>
+    <RoutingDataProvider>
+      <Suspense fallback={<RoutePageFallback />}>
+        <Routes>
+          <Route path="/" element={<Index />} />
+          <Route path="/boats" element={<Boats />} />
+          <Route path="/boats-map" element={<BoatsMap />} />
+          <Route path="/boats/:boatRef" element={<BoatDetails />} />
+          <Route path="/destinations" element={<DestinationsPage />} />
+          <Route path="/about" element={<About />} />
+          <Route path="/owner-profile" element={<OwnerRoute><OwnerProfile /></OwnerRoute>} />
+          <Route path="/owner-dashboard" element={<OwnerRoute><OwnerDashboard /></OwnerRoute>} />
+          <Route path="/owners/:ownerSlug" element={<OwnerFleet />} />
+          <Route path="/portal" element={<RoleRouter />} />
+          <Route path="/profile" element={<RoleRouter />} />
+          <Route path="/admin" element={<Navigate to="/portal" replace />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/customer-profile" element={<CustomerRoute><CustomerProfile /></CustomerRoute>} />
+          <Route path="/history" element={<History />} />
+          <Route path="/contact-owner" element={<ContactOwner />} />
+          <Route path="/booking" element={<Booking />} />
+          <Route path="/booking-closed" element={<BookingClosed />} />
+          <Route path="/booking-confirmed" element={<BookingConfirmed />} />
+          <Route path="/chat" element={<Chat />} />
+          <Route path="/become-owner" element={<BecomeOwner />} />
+          <Route path="/favorites" element={<Favorites />} />
+          <Route path="/post-trip-review" element={<PostTripReview />} />
+          <Route path="/business-promotions" element={<BusinessPromotions />} />
+          <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+          <Route path="/report" element={<ReportIssue />} />
+          <Route path="/terms-of-service" element={<TermsOfService />} />
+          <Route path="/cookie-policy" element={<CookiePolicy />} />
+          <Route path="/refund-policy" element={<RefundPolicy />} />
+          <Route path="/boat-owner-agreement" element={<BoatOwnerAgreement />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+      <SupportChat />
+    </RoutingDataProvider>
   </BrowserRouter>
 );
 
@@ -200,13 +231,15 @@ const App = () => (
       <Sonner />
       <LanguageProvider>
         <AuthProvider>
-          {hasUsableGoogleClientId ? (
-            <GoogleOAuthProvider clientId={googleClientId}>
+          <AppErrorBoundary>
+            {hasUsableGoogleClientId ? (
+              <GoogleOAuthProvider clientId={googleClientId}>
+                <AppRoutes />
+              </GoogleOAuthProvider>
+            ) : (
               <AppRoutes />
-            </GoogleOAuthProvider>
-          ) : (
-            <AppRoutes />
-          )}
+            )}
+          </AppErrorBoundary>
         </AuthProvider>
       </LanguageProvider>
     </TooltipProvider>

@@ -3,33 +3,72 @@ import { useSEO } from "@/hooks/useSEO";
 import { useStructuredData } from "@/hooks/useStructuredData";
 import { Link, useParams } from "react-router-dom";
 import { format, isSameDay, parseISO } from "date-fns";
-import { CalendarDays, Check, Gauge, MapPin, MessageCircle, Navigation, ShieldCheck, Star, Users } from "lucide-react";
+import { Check, Flag, Gauge, MapPin, MessageCircle, Navigation, ShieldCheck, Star, Users } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
+import { BoatDetailsPageSkeleton } from "@/components/loading/LoadingUI";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import BoatLocationMap from "@/components/BoatLocationMap";
 import { buildBoatPublicSlug, getBoatByPublicReference } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
-import { getBoatReviews, getBoatReviewStats } from "@/lib/reviews";
+import { getBoatReviews, getBoatReviewStats, type BoatReview } from "@/lib/reviews";
 import { trackBoatViewed, trackBookingStarted } from "@/lib/analytics";
-import { toOwnerSlug } from "@/lib/owners";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { withRetry } from "@/lib/retry";
 
 const BoatDetails = () => {
   const { tl } = useLanguage();
   const { boatRef } = useParams<{ boatRef: string }>();
   const [boat, setBoat] = useState<Boat | null>(null);
+  const [isBoatLoading, setIsBoatLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [selectedImage, setSelectedImage] = useState(0);
+  const [showMobileBookingCta, setShowMobileBookingCta] = useState(true);
   const bookingRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!boatRef) return;
-    setBoat(null);
-    setSelectedImage(0);
-    getBoatByPublicReference(boatRef).then(setBoat);
+    let cancelled = false;
+
+    const loadBoat = async () => {
+      if (!boatRef) {
+        if (!cancelled) {
+          setBoat(null);
+          setIsBoatLoading(false);
+        }
+        return;
+      }
+
+      if (!cancelled) {
+        setBoat(null);
+        setSelectedImage(0);
+        setIsBoatLoading(true);
+      }
+
+      try {
+        const foundBoat = await withRetry(() => getBoatByPublicReference(boatRef), { retries: 2, initialDelayMs: 220 });
+        if (!cancelled) {
+          setBoat(foundBoat);
+          setLoadError("");
+          setIsBoatLoading(false);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setBoat(null);
+          setLoadError(error instanceof Error ? error.message : "Unable to load boat details.");
+          setIsBoatLoading(false);
+        }
+      }
+    };
+
+    loadBoat();
+
+    return () => {
+      cancelled = true;
+    };
   }, [boatRef]);
 
   const unavailableDates = boat?.availability.unavailableDates.map((date) => parseISO(date)) ?? [];
@@ -39,12 +78,11 @@ const BoatDetails = () => {
     date.setDate(date.getDate() + index);
     return date;
   }).find((date) => !unavailableDates.some((blockedDate) => isSameDay(blockedDate, date)));
-  const mapQuery = boat ? encodeURIComponent(boat.mapQuery) : "";
-  const googleMapsUrl = boat ? `https://www.google.com/maps/search/?api=1&query=${mapQuery}` : "/boats";
-  const googleDirectionsUrl = boat ? `https://www.google.com/maps/dir/?api=1&destination=${mapQuery}` : "/boats";
-  const mapEmbedUrl = boat ? `https://www.google.com/maps?q=${mapQuery}&z=13&output=embed` : "";
-  const [boatReviews, setBoatReviews] = useState<any[]>([]);
+  const mapQuery = boat?.mapQuery ?? "";
+  const googleDirectionsUrl = boat ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mapQuery)}` : "/boats";
+  const [boatReviews, setBoatReviews] = useState<BoatReview[]>([]);
   const [reviewStats, setReviewStats] = useState({ total: 0, averageRating: 0 });
+  const [selectedReview, setSelectedReview] = useState<BoatReview | null>(null);
   const publicBoatRef = boat ? boat.publicSlug || buildBoatPublicSlug(boat) : "";
   const publicBoatUrl = boat ? `https://nautiq.gr/boats/${publicBoatRef}` : undefined;
 
@@ -149,6 +187,49 @@ const BoatDetails = () => {
     bookingRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  useEffect(() => {
+    const bookingElement = bookingRef.current;
+    if (!bookingElement) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setShowMobileBookingCta(!entry.isIntersecting);
+      },
+      { threshold: 0.35 },
+    );
+
+    observer.observe(bookingElement);
+    return () => observer.disconnect();
+  }, [boat?.id]);
+
+  if (isBoatLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        <BoatDetailsPageSkeleton />
+        <Footer />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        <main className="pt-24 pb-20">
+          <div className="container mx-auto px-4 text-center space-y-4">
+            <h1 className="text-3xl font-heading font-bold text-foreground">{tl("Could not load boat", "Δεν ήταν δυνατή η φόρτωση σκάφους")}</h1>
+            <p className="text-muted-foreground">{loadError}</p>
+            <Link to="/boats" className="text-aegean hover:text-turquoise font-medium">{tl("Back to boats →", "Επιστροφή στα σκάφη →")}</Link>
+          </div>
+        </main>
+        <Footer />
+      </div>
+    );
+  }
+
   if (!boat) {
     return (
       <div className="min-h-screen bg-background">
@@ -170,14 +251,16 @@ const BoatDetails = () => {
       <Navbar />
 
       {/* Mobile Book Now Button */}
-      <button
-        onClick={scrollToBooking}
-        className="fixed bottom-4 left-4 right-4 md:hidden z-40 py-3 px-4 bg-gradient-accent text-accent-foreground font-semibold rounded-xl shadow-lg hover:opacity-90 transition-opacity"
-      >
-        {tl("Book Now", "Κράτηση τώρα")}
-      </button>
+      {showMobileBookingCta ? (
+        <button
+          onClick={scrollToBooking}
+          className="fixed bottom-4 left-4 right-4 md:hidden z-[1200] py-3 px-4 bg-gradient-accent text-accent-foreground font-semibold rounded-xl shadow-lg hover:opacity-90 transition-opacity"
+        >
+          {tl("Book Now", "Κράτηση τώρα")}
+        </button>
+      ) : null}
 
-      <main className="pt-16 pb-20 md:pb-0">
+      <main className="relative z-10 pt-16 pb-20 md:pb-0">
         <section className="py-8 md:py-10 border-b border-border">
           <div className="container mx-auto px-4 flex items-center justify-between gap-4">
             <div>
@@ -265,7 +348,7 @@ const BoatDetails = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4">
                   <div className="rounded-3xl border border-border bg-muted/20 p-5 space-y-4">
                     <div className="flex items-start gap-4">
                       <Avatar className="h-14 w-14 border border-border">
@@ -277,72 +360,84 @@ const BoatDetails = () => {
                             .slice(0, 2)}
                         </AvatarFallback>
                       </Avatar>
-                      <div className="space-y-1">
+                      <div className="space-y-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="font-heading text-lg font-semibold text-foreground">{tl("Hosted by", "Οικοδεσπότης")} {boat.owner.name}</h2>
-                          {boat.owner.isSuperhost ? <Badge className="bg-aegean text-primary-foreground">{tl("Guest favorite", "Αγαπημένο των επισκεπτών")}</Badge> : null}
+                          <h2 className="font-heading text-lg font-semibold text-foreground">
+                            {tl("Hosted by", "Οικοδεσπότης")} {boat.owner.name}
+                          </h2>
+                          {boat.owner.isSuperhost ? (
+                            <Badge className="bg-aegean text-primary-foreground">
+                              {tl("Guest favorite", "Αγαπημένο των επισκεπτών")}
+                            </Badge>
+                          ) : null}
                         </div>
-                        <p className="text-sm text-muted-foreground">{boat.owner.title} since {boat.owner.joinedYear}</p>
+                        <p className="text-sm text-muted-foreground break-words">
+                          {boat.owner.title} · {tl("member since", "μέλος από")} {boat.owner.joinedYear}
+                        </p>
                       </div>
                     </div>
 
-                    <p className="text-sm text-muted-foreground">{boat.owner.bio}</p>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
                       <div className="rounded-2xl border border-border bg-background p-3">
-                        <p className="text-muted-foreground text-xs">Trips</p>
+                        <p className="text-muted-foreground text-[11px]">{tl("Trips", "Ταξίδια")}</p>
                         <p className="font-semibold text-foreground">{boat.owner.tripsHosted}</p>
                       </div>
                       <div className="rounded-2xl border border-border bg-background p-3">
-                        <p className="text-muted-foreground text-xs">Response rate</p>
+                        <p className="text-muted-foreground text-[11px]">{tl("Response", "Απάντηση")}</p>
                         <p className="font-semibold text-foreground">{boat.owner.responseRate}%</p>
                       </div>
                       <div className="rounded-2xl border border-border bg-background p-3">
-                        <p className="text-muted-foreground text-xs">Languages</p>
+                        <p className="text-muted-foreground text-[11px]">{tl("Usually replies", "Συνήθως απαντά")}</p>
+                        <p className="font-semibold text-foreground truncate">{boat.responseTime}</p>
+                      </div>
+                      <div className="rounded-2xl border border-border bg-background p-3">
+                        <p className="text-muted-foreground text-[11px]">{tl("Languages", "Γλώσσες")}</p>
                         <p className="font-semibold text-foreground">{boat.owner.languages.length}</p>
                       </div>
                     </div>
 
-                    <p className="text-xs text-muted-foreground">Speaks {boat.owner.languages.join(", ")}.</p>
-                    <Button asChild variant="outline" className="w-full">
-                      <Link to={`/owners/${toOwnerSlug(boat.owner.name)}`}>View all boats by this owner</Link>
-                    </Button>
-                  </div>
+                    <p className="text-sm text-muted-foreground leading-relaxed">{boat.owner.bio}</p>
 
-                  <div className="rounded-3xl border border-border bg-muted/20 p-5 space-y-4">
-                    <div className="flex items-center gap-2">
-                      <CalendarDays className="h-5 w-5 text-aegean" />
-                      <h2 className="font-heading text-lg font-semibold text-foreground">{tl("Availability check", "Έλεγχος διαθεσιμότητας")}</h2>
-                    </div>
-                    <Calendar
-                      mode="single"
-                      selected={nextAvailableDate}
-                      disabled={unavailableDates}
-                      className="rounded-2xl border border-border bg-background"
-                    />
-                    <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                      {unavailableDates.slice(0, 4).map((date) => (
-                        <Badge key={date.toISOString()} variant="outline">
-                          Booked {format(date, "d MMM")}
+                    <div className="flex flex-wrap gap-2">
+                      {boat.owner.languages.map((language) => (
+                        <Badge key={language} variant="outline" className="text-xs">
+                          {language}
                         </Badge>
                       ))}
                     </div>
-                    <p className="text-sm text-muted-foreground">
-                      {tl("Next open day:", "Επόμενη διαθέσιμη ημέρα:")} <span className="font-medium text-foreground">{nextAvailableDate ? format(nextAvailableDate, "EEEE, d MMM") : tl("Check with owner", "Επικοινώνησε με τον ιδιοκτήτη")}</span>
-                    </p>
-                    <p className="text-xs text-muted-foreground">Minimum notice: {boat.availability.minNoticeHours} hours before departure.</p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <Button asChild variant="outline" className="w-full">
+                        <Link to={`/boats?owner=${encodeURIComponent(boat.owner.name)}`}>
+                          {tl("View all boats by this owner", "Δες όλα τα σκάφη του ιδιοκτήτη")}
+                        </Link>
+                      </Button>
+                      <Button asChild variant="outline" className="w-full">
+                        <Link to={`/chat?boatRef=${encodeURIComponent(publicBoatRef)}&boat=${encodeURIComponent(boat.name)}`}>
+                          <MessageCircle className="mr-2 h-4 w-4" />{tl("Chat with owner", "Συνομιλία με ιδιοκτήτη")}
+                        </Link>
+                      </Button>
+                    </div>
                   </div>
+
                 </div>
 
-                <div className="rounded-3xl border border-border overflow-hidden bg-card">
+                <div className="relative z-0 rounded-3xl border border-border overflow-hidden bg-card">
                   <div className="grid grid-cols-1 xl:grid-cols-[1.15fr_0.85fr]">
-                    <div className="min-h-[280px] border-b xl:border-b-0 xl:border-r border-border">
-                      <iframe
-                        title={`Map for ${boat.name}`}
-                        src={mapEmbedUrl}
-                        className="h-full min-h-[280px] w-full"
-                        loading="lazy"
-                        referrerPolicy="no-referrer-when-downgrade"
+                    <div className="relative z-0 border-b xl:border-b-0 xl:border-r border-border overflow-hidden">
+                      <BoatLocationMap
+                        points={[
+                          {
+                            id: boat.id,
+                            name: boat.name,
+                            query: boat.mapQuery,
+                            subtitle: `${boat.departureMarina} • ${boat.location}`,
+                          },
+                        ]}
+                        selectedPointId={boat.id}
+                        emptyLabel={tl("Pickup point map is unavailable.", "Ο χάρτης σημείου παραλαβής δεν είναι διαθέσιμος.")}
+                        loadingLabel={tl("Loading marina map…", "Φόρτωση χάρτη μαρίνας…")}
+                        heightClassName="h-[300px]"
                       />
                     </div>
                     <div className="p-5 space-y-4">
@@ -352,19 +447,13 @@ const BoatDetails = () => {
                         <p className="text-sm text-muted-foreground mt-1">{boat.location}, Greece</p>
                       </div>
                       <p className="text-sm text-muted-foreground">
-                        Open the exact marina in Google Maps or start navigation before leaving for the harbor.
+                        Pan and zoom the marina directly here, or open directions before heading to the harbor.
                       </p>
                       <div className="flex flex-col sm:flex-row gap-3">
                         <Button asChild className="bg-gradient-accent text-accent-foreground">
                           <a href={googleDirectionsUrl} target="_blank" rel="noreferrer">
                             <Navigation className="mr-2 h-4 w-4" />
-                            {tl("Navigate in Google Maps", "Πλοήγηση στο Google Maps")}
-                          </a>
-                        </Button>
-                        <Button asChild variant="outline">
-                          <a href={googleMapsUrl} target="_blank" rel="noreferrer">
-                            <MapPin className="mr-2 h-4 w-4" />
-                            {tl("Open marina map", "Άνοιγμα χάρτη μαρίνας")}
+                            {tl("Open directions", "Άνοιγμα οδηγιών")}
                           </a>
                         </Button>
                       </div>
@@ -402,6 +491,18 @@ const BoatDetails = () => {
                       <MessageCircle className="mr-2 h-4 w-4" />{tl("Chat with owner", "Συνομιλία με ιδιοκτήτη")}
                     </Link>
                   </Button>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <Button asChild variant="ghost" className="w-full justify-start text-muted-foreground hover:text-foreground">
+                      <Link to={`/report?type=boat&target=${encodeURIComponent(boat.name)}&targetRef=${encodeURIComponent(publicBoatRef)}&subject=${encodeURIComponent(`Report boat: ${boat.name}`)}`}>
+                        <Flag className="mr-2 h-4 w-4" />{tl("Report this boat", "Αναφορά σκάφους")}
+                      </Link>
+                    </Button>
+                    <Button asChild variant="ghost" className="w-full justify-start text-muted-foreground hover:text-foreground">
+                      <Link to={`/report?type=owner&target=${encodeURIComponent(boat.owner.name)}&targetRef=${encodeURIComponent(publicBoatRef)}&subject=${encodeURIComponent(`Report owner for ${boat.name}`)}`}>
+                        <Flag className="mr-2 h-4 w-4" />{tl("Report this owner", "Αναφορά ιδιοκτήτη")}
+                      </Link>
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -422,9 +523,25 @@ const BoatDetails = () => {
                         <div key={review.id} className="rounded-2xl border border-border p-4">
                           <div className="flex items-center justify-between gap-2">
                             <p className="font-medium text-foreground">{review.title}</p>
-                            <p className="text-xs text-muted-foreground">{review.customerName}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs text-muted-foreground">{review.customerName}</p>
+                              <div className="flex items-center gap-0.5" aria-label={`Rating ${review.rating} out of 5`}>
+                                {[1, 2, 3, 4, 5].map((index) => (
+                                  <Star
+                                    key={`${review.id}-star-${index}`}
+                                    className={`h-3.5 w-3.5 ${index <= review.rating ? "fill-amber-400 text-amber-400" : "text-muted-foreground/40"}`}
+                                  />
+                                ))}
+                              </div>
+                            </div>
                           </div>
-                          <p className="text-sm text-muted-foreground mt-1 break-words">{review.comment}</p>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedReview(review)}
+                            className="mt-1 text-left text-sm text-muted-foreground break-words hover:text-foreground transition-colors"
+                          >
+                            {review.comment}
+                          </button>
                         </div>
                       ))}
                     </div>
@@ -433,6 +550,30 @@ const BoatDetails = () => {
                   )}
                 </CardContent>
               </Card>
+
+              <Dialog open={Boolean(selectedReview)} onOpenChange={(open) => { if (!open) setSelectedReview(null); }}>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>{selectedReview?.title ?? tl("Guest review", "Αξιολόγηση επισκέπτη")}</DialogTitle>
+                    <DialogDescription>
+                      {selectedReview?.customerName}
+                    </DialogDescription>
+                  </DialogHeader>
+                  {selectedReview ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-1">
+                        {[1, 2, 3, 4, 5].map((index) => (
+                          <Star
+                            key={`selected-review-star-${index}`}
+                            className={`h-4 w-4 ${index <= selectedReview.rating ? "fill-amber-400 text-amber-400" : "text-muted-foreground/40"}`}
+                          />
+                        ))}
+                      </div>
+                      <p className="text-sm text-muted-foreground break-words">{selectedReview.comment}</p>
+                    </div>
+                  ) : null}
+                </DialogContent>
+              </Dialog>
             </div>
           </div>
         </section>

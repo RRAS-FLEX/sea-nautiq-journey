@@ -1,31 +1,17 @@
 import { useMemo } from "react";
 import { format } from "date-fns";
-import { Calendar as CalendarIcon, Clock3 } from "lucide-react";
+import { CalendarIcon } from "lucide-react";
 import { Button } from "./ui/button";
 import { Calendar } from "./ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
 
 interface DateTimePickerProps {
   value: string;
   onChange: (value: string) => void;
 }
 
-const hourOptions = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, "0"));
-const minuteOptions = ["00", "15", "30", "45"];
-
-const getClosestMinuteOption = (minute: number) => {
-  const closest = minuteOptions
-    .map(Number)
-    .reduce((previous, current) => (Math.abs(current - minute) < Math.abs(previous - minute) ? current : previous));
-  return String(closest).padStart(2, "0");
-};
+const HOUR_SLOTS = ["07","08","09","10","11","12","13","14","15","16","17","18","19","20"];
+const MINUTE_SLOTS = ["00", "15", "30", "45"];
 
 const toDateValue = (value: string) => {
   if (!value) {
@@ -50,7 +36,13 @@ const DateTimePicker = ({ value, onChange }: DateTimePickerProps) => {
 
   const safeDate = selectedDateTime ?? new Date();
   const selectedHour = String(safeDate.getHours()).padStart(2, "0");
-  const selectedMinute = getClosestMinuteOption(safeDate.getMinutes());
+  const selectedMinute = (() => {
+    const m = safeDate.getMinutes();
+    const closest = [0, 15, 30, 45].reduce((prev, cur) =>
+      Math.abs(cur - m) < Math.abs(prev - m) ? cur : prev
+    );
+    return String(closest).padStart(2, "0");
+  })();
 
   const updateDatePart = (nextDate: Date) => {
     const merged = new Date(nextDate);
@@ -75,14 +67,14 @@ const DateTimePicker = ({ value, onChange }: DateTimePickerProps) => {
       <PopoverTrigger asChild>
         <Button variant="ghost" className="h-auto p-0 w-full justify-start text-left hover:bg-transparent">
           <span className="text-sm text-foreground truncate">
-            {selectedDateTime ? format(selectedDateTime, "PPP p") : "Pick date & hour"}
+            {selectedDateTime ? format(selectedDateTime, "d MMM '·' HH:mm") : "Pick date & time"}
           </span>
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[320px] max-w-[calc(100vw-2rem)] p-3 space-y-3">
+      <PopoverContent align="start" className="w-auto max-w-[calc(100vw-2rem)] p-4 space-y-4">
         <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
           <CalendarIcon className="h-3.5 w-3.5" />
-          Select date and hour
+          Select date and time
         </div>
         <Calendar
           mode="single"
@@ -94,32 +86,44 @@ const DateTimePicker = ({ value, onChange }: DateTimePickerProps) => {
           }}
           initialFocus
         />
-        <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground flex items-center gap-1"><Clock3 className="h-3 w-3" />Hour</p>
-            <Select value={selectedHour} onValueChange={updateHour}>
-              <SelectTrigger>
-                <SelectValue placeholder="Hour" />
-              </SelectTrigger>
-              <SelectContent>
-                {hourOptions.map((hour) => (
-                  <SelectItem key={hour} value={hour}>{hour}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        <div className="border-t border-border pt-3 space-y-3">
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">Hour</p>
+            <div className="grid grid-cols-7 gap-1">
+              {HOUR_SLOTS.map((h) => (
+                <button
+                  key={h}
+                  type="button"
+                  onClick={() => updateHour(h)}
+                  className={`text-xs rounded-lg py-1.5 border transition-colors ${
+                    selectedHour === h
+                      ? "border-primary bg-primary/10 text-primary font-semibold"
+                      : "border-border text-muted-foreground hover:text-foreground hover:border-primary/50"
+                  }`}
+                >
+                  {h}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">Minutes</p>
-            <Select value={selectedMinute} onValueChange={updateMinute}>
-              <SelectTrigger>
-                <SelectValue placeholder="Minutes" />
-              </SelectTrigger>
-              <SelectContent>
-                {minuteOptions.map((minute) => (
-                  <SelectItem key={minute} value={minute}>{minute}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">Minutes</p>
+            <div className="grid grid-cols-4 gap-1">
+              {MINUTE_SLOTS.map((min) => (
+                <button
+                  key={min}
+                  type="button"
+                  onClick={() => updateMinute(min)}
+                  className={`text-xs rounded-lg py-1.5 border transition-colors ${
+                    selectedMinute === min
+                      ? "border-primary bg-primary/10 text-primary font-semibold"
+                      : "border-border text-muted-foreground hover:text-foreground hover:border-primary/50"
+                  }`}
+                >
+                  :{min}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </PopoverContent>

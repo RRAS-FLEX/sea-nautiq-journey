@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { format } from "date-fns";
 import { Lightbulb, MessageCircle, RefreshCcw, Send, Sparkles } from "lucide-react";
@@ -10,11 +10,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  addMessage,
+  addMessageToThread,
   getOrCreateThread,
-  simulateOwnerReplyAsync,
+  getOwnerThreads,
+  getThreadById,
   type ChatMessage,
   type ChatThread,
+  type ChatThreadSummary,
 } from "@/lib/chat";
 import { buildBoatDetailsPath, getBoatByPublicReference } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
@@ -88,17 +90,6 @@ const Bubble = ({
   );
 };
 
-const TypingIndicator = ({ ownerName }: { ownerName: string }) => (
-  <div className="flex gap-2 items-end">
-    <OwnerAvatar ownerName={ownerName} />
-    <div className="rounded-2xl rounded-bl-sm bg-muted px-4 py-3 flex gap-1 items-center">
-      <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:0ms]" />
-      <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:150ms]" />
-      <span className="h-2 w-2 rounded-full bg-muted-foreground/40 animate-bounce [animation-delay:300ms]" />
-    </div>
-  </div>
-);
-
 const buildSuggestionIdeas = (boatName: string, ownerName: string, tl: (en: string, el: string) => string) => [
   tl(`Is ${boatName} available next weekend?`, `Είναι διαθέσιμο το ${boatName} το επόμενο Σαββατοκύριακο;`),
   tl("Can you do a sunset cruise?", "Μπορείτε να κάνετε sunset κρουαζιέρα;"),
@@ -110,12 +101,24 @@ const buildSuggestionIdeas = (boatName: string, ownerName: string, tl: (en: stri
 
 const Chat = () => {
   const { tl } = useLanguage();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user: sessionUser } = useCurrentUser();
   const customerName = sessionUser?.name ?? "You";
+  const isOwnerMode = Boolean(sessionUser?.isOwner);
 
   const boatReference = searchParams.get("boatRef") ?? searchParams.get("boatId") ?? "";
+  const threadIdFromQuery = searchParams.get("threadId") ?? "";
   const [boat, setBoat] = useState<Boat | null>(null);
+  const [ownerThreads, setOwnerThreads] = useState<ChatThreadSummary[]>([]);
+  const [thread, setThread] = useState<ChatThread | null>(null);
+
+  const [draft, setDraft] = useState("");
+  const [isSending, setIsSending] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const maxMessageLength = 240;
 
   useEffect(() => {
     if (!boatReference) {
@@ -127,127 +130,142 @@ const Chat = () => {
   }, [boatReference]);
 
   const boatName = boat?.name ?? searchParams.get("boat") ?? "this boat";
-  const ownerName = boat?.owner.name ?? "Owner";
+  const ownerName = thread?.ownerName ?? boat?.owner.name ?? "Owner";
+  const activeCustomerName = thread?.customerName ?? customerName;
   const boatProfileLink = boat ? buildBoatDetailsPath(boat) : "/boats";
-
-  const [thread, setThread] = useState<ChatThread | null>(null);
-  const [draft, setDraft] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-  const [isSending, setIsSending] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const ownerReplyTimerRef = useRef<number | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
   const hasBoatContext = Boolean(boatReference);
-  const boatId = boat?.id ?? "";
-  const maxMessageLength = 240;
-  const suggestionIdeas = buildSuggestionIdeas(boatName, ownerName, tl);
+  const suggestionIdeas = useMemo(() => buildSuggestionIdeas(boatName, ownerName, tl), [boatName, ownerName, tl]);
 
   const scrollToBottom = () =>
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
 
   useEffect(() => {
     scrollToBottom();
-  }, [thread?.messages, isTyping]);
+  }, [thread?.messages]);
+
+  const loadThreadById = async (threadId: string, syncQuery = true) => {
+    const nextThread = await getThreadById(threadId);
+    setThread(nextThread);
+
+    if (syncQuery) {
+      const nextParams = new URLSearchParams(searchParams);
+      nextParams.set("threadId", threadId);
+      setSearchParams(nextParams, { replace: true });
+    }
+  };
+
+  const reloadActiveThread = async () => {
+    if (!thread?.id) {
+      return;
+    }
+    await loadThreadById(thread.id, false);
+  };
+
+  const loadOwnerInbox = async (openFirstIfMissing = false) => {
+    const threads = await getOwnerThreads();
+    setOwnerThreads(threads);
+
+    const preferredThreadId = threadIdFromQuery || (openFirstIfMissing ? threads[0]?.id : "");
+    if (preferredThreadId) {
+      await loadThreadById(preferredThreadId, !threadIdFromQuery);
+    } else {
+      setThread(null);
+    }
+  };
 
   useEffect(() => {
-    if (!boatReference || !sessionUser || !boat?.id) {
-      if (!boatReference) {
-        setErrorMessage(tl("Missing boat context. Open chat from a boat profile.", "Λείπει το σκάφος. Άνοιξε τη συνομιλία από το προφίλ σκάφους."));
-      }
+    if (!sessionUser) {
       setThread(null);
+      setOwnerThreads([]);
+      setErrorMessage("");
       return;
     }
 
-    const loadThread = async () => {
+    const load = async () => {
       try {
         setErrorMessage("");
-        const freshThread = await getOrCreateThread(boat.id, boat.name, ownerName);
-        setThread(freshThread);
+
+        if (isOwnerMode) {
+          await loadOwnerInbox(true);
+          return;
+        }
+
+        if (!boatReference || !boat?.id) {
+          setThread(null);
+          setErrorMessage(tl("Missing boat context. Open chat from a boat profile.", "Λείπει το σκάφος. Άνοιξε τη συνομιλία από το προφίλ σκάφους."));
+          return;
+        }
+
+        const customerThread = await getOrCreateThread(boat.id, boat.name, ownerName);
+        setThread(customerThread);
       } catch (error) {
+        setThread(null);
         setErrorMessage(error instanceof Error ? error.message : "Unable to load chat.");
       }
     };
 
-    loadThread();
-  }, [boat?.id, boat?.name, boatReference, ownerName, sessionUser, tl]);
+    load();
+  }, [sessionUser?.id, isOwnerMode, boatReference, boat?.id]);
 
   useEffect(() => {
-    return () => {
-      if (ownerReplyTimerRef.current) {
-        window.clearTimeout(ownerReplyTimerRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!sessionUser || !boat?.id) {
+    if (!sessionUser) {
       return;
     }
 
     const intervalId = window.setInterval(() => {
-      if (isTyping || isSending) {
+      if (isSending) {
         return;
       }
 
-      reloadThread().catch(() => {
-        // Keep polling resilient without interrupting UI.
-      });
-    }, 12000);
+      if (isOwnerMode) {
+        loadOwnerInbox(false).catch(() => {
+          // Keep polling resilient without interrupting UI.
+        });
+      } else {
+        reloadActiveThread().catch(() => {
+          // Keep polling resilient without interrupting UI.
+        });
+      }
+    }, 10000);
 
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [sessionUser, boat?.id, isTyping, isSending]);
-
-  const reloadThread = async () => {
-    if (!boat?.id || !sessionUser) {
-      return;
-    }
-    const freshThread = await getOrCreateThread(boat.id, boat.name, ownerName);
-    setThread(freshThread);
-  };
+  }, [sessionUser?.id, isOwnerMode, isSending, thread?.id, threadIdFromQuery]);
 
   const handleSend = async () => {
     const text = draft.trim();
-    if (!text || text.length > maxMessageLength || !boat?.id || !sessionUser || isSending) return;
+    if (!text || text.length > maxMessageLength || !sessionUser || !thread?.id || isSending) return;
 
     try {
       setIsSending(true);
       setErrorMessage("");
-      await addMessage(boat.id, "customer", text);
+      await addMessageToThread(thread.id, isOwnerMode ? "owner" : "customer", text);
       setDraft("");
-      await reloadThread();
-
-      setIsTyping(true);
-      const delay = 1400 + Math.random() * 1200;
-      ownerReplyTimerRef.current = window.setTimeout(() => {
-        simulateOwnerReplyAsync(boat.id)
-          .then(() => reloadThread())
-          .catch((error) => setErrorMessage(error instanceof Error ? error.message : tl("Unable to load chat", "Αδυναμία φόρτωσης συνομιλίας")))
-          .finally(() => {
-            setIsTyping(false);
-            setIsSending(false);
-            ownerReplyTimerRef.current = null;
-          });
-      }, delay);
+      await reloadActiveThread();
+      if (isOwnerMode) {
+        await loadOwnerInbox(false);
+      }
     } catch (error) {
-      setIsSending(false);
-      setIsTyping(false);
       setErrorMessage(error instanceof Error ? error.message : tl("Unable to load chat", "Αδυναμία φόρτωσης συνομιλίας"));
+    } finally {
+      setIsSending(false);
     }
   };
 
   const handleManualRefresh = async () => {
-    if (!sessionUser || !boat?.id) {
+    if (!sessionUser) {
       return;
     }
 
     try {
       setIsRefreshing(true);
       setErrorMessage("");
-      await reloadThread();
+      if (isOwnerMode) {
+        await loadOwnerInbox(false);
+      } else {
+        await reloadActiveThread();
+      }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : tl("Unable to load chat", "Αδυναμία φόρτωσης συνομιλίας"));
     } finally {
@@ -267,41 +285,51 @@ const Chat = () => {
     }
   };
 
+  const openOwnerThread = async (threadSummary: ChatThreadSummary) => {
+    try {
+      setErrorMessage("");
+      await loadThreadById(threadSummary.id, true);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to open conversation.");
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <Navbar />
 
       <main className="flex-1 pt-16 flex flex-col">
-        {/* ── Header ── */}
         <div className="border-b border-border bg-card">
           <div className="container mx-auto px-4 py-4 flex items-center gap-4">
-            <Link to={boatProfileLink} className="text-sm text-aegean hover:text-turquoise font-medium shrink-0">
-              ← {boatName}
-            </Link>
+            {isOwnerMode ? (
+              <span className="text-sm font-medium text-aegean shrink-0">Owner inbox</span>
+            ) : (
+              <Link to={boatProfileLink} className="text-sm text-aegean hover:text-turquoise font-medium shrink-0">
+                ← {boatName}
+              </Link>
+            )}
             <div className="flex-1 flex items-center gap-3 min-w-0">
               <OwnerAvatar ownerName={ownerName} size="lg" />
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <p className="font-semibold text-foreground truncate">{ownerName}</p>
-                  {boat?.owner.isSuperhost && (
+                  <p className="font-semibold text-foreground truncate">{isOwnerMode ? activeCustomerName : ownerName}</p>
+                  {!isOwnerMode && boat?.owner.isSuperhost && (
                     <Badge className="bg-aegean text-primary-foreground shrink-0">{tl("Guest favorite", "Αγαπημένο των επισκεπτών")}</Badge>
                   )}
                 </div>
                 <p className="text-xs text-muted-foreground truncate">
-                  {boat?.owner.title ?? tl("Boat owner", "Ιδιοκτήτης σκάφους")} · {boat?.responseTime ?? tl("Usually responds fast", "Συνήθως απαντά γρήγορα")}
+                  {isOwnerMode
+                    ? `Boat: ${thread?.boatName ?? "-"}`
+                    : `${boat?.owner.title ?? tl("Boat owner", "Ιδιοκτήτης σκάφους")} · ${boat?.responseTime ?? tl("Usually responds fast", "Συνήθως απαντά γρήγορα")}`}
                 </p>
               </div>
-            </div>
-            <div className="shrink-0 flex items-center gap-1.5 text-xs text-emerald-500">
-              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-              {tl("Online", "Online")}
             </div>
             <Button
               variant="ghost"
               size="sm"
               className="hidden sm:inline-flex text-xs"
               onClick={handleManualRefresh}
-              disabled={isRefreshing || !sessionUser || !hasBoatContext}
+              disabled={isRefreshing || !sessionUser || (!hasBoatContext && !isOwnerMode)}
             >
               <RefreshCcw className={`mr-1.5 h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
               {tl("Refresh", "Ανανέωση")}
@@ -309,13 +337,34 @@ const Chat = () => {
           </div>
         </div>
 
-        {/* ── Messages ── */}
-        <div className="flex-1 flex flex-col container mx-auto px-4 max-w-3xl w-full py-4 sm:py-6 gap-4 sm:gap-6 min-h-0">
+        <div className="flex-1 flex flex-col container mx-auto px-4 max-w-5xl w-full py-4 sm:py-6 gap-4 sm:gap-6 min-h-0">
+          {isOwnerMode && ownerThreads.length > 0 ? (
+            <div className="rounded-2xl border border-border bg-card p-3">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Conversations</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {ownerThreads.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => openOwnerThread(item)}
+                    className={`text-left rounded-xl border p-3 transition-colors ${
+                      thread?.id === item.id ? "border-aegean bg-aegean/5" : "border-border hover:border-aegean/40"
+                    }`}
+                  >
+                    <p className="text-sm font-semibold text-foreground truncate">{item.customerName}</p>
+                    <p className="text-xs text-muted-foreground truncate">{item.boatName}</p>
+                    <p className="text-xs text-muted-foreground mt-1 truncate">{item.lastMessageText || "No messages yet"}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           <ScrollArea className="flex-1 rounded-2xl sm:rounded-3xl border border-border bg-background p-3 sm:p-4 h-[calc(100dvh-20rem)] sm:h-[calc(100dvh-18rem)]">
             {!sessionUser ? (
               <div className="h-full flex flex-col items-center justify-center gap-3 py-16 text-center">
                 <p className="font-semibold text-foreground">{tl("Sign in to start chatting", "Συνδέσου για να ξεκινήσεις συνομιλία")}</p>
-                <p className="text-sm text-muted-foreground max-w-xs">{tl("Owner conversations now use your Supabase account instead of browser-only storage.", "Οι συνομιλίες με ιδιοκτήτες χρησιμοποιούν τώρα τον λογαριασμό Supabase αντί για τοπική αποθήκευση browser.")}</p>
+                <p className="text-sm text-muted-foreground max-w-xs">{tl("Owner conversations use your Supabase account.", "Οι συνομιλίες με ιδιοκτήτες χρησιμοποιούν τον λογαριασμό Supabase.")}</p>
                 <Button asChild variant="outline" size="sm">
                   <Link to="/">{tl("Go to home and sign in", "Πήγαινε στην αρχική και συνδέσου")}</Link>
                 </Button>
@@ -334,22 +383,26 @@ const Chat = () => {
                 <div className="rounded-full bg-aegean/10 p-4">
                   <MessageCircle className="h-8 w-8 text-aegean" />
                 </div>
-                <p className="font-semibold text-foreground">Start a conversation</p>
+                <p className="font-semibold text-foreground">{isOwnerMode ? "No active conversation selected" : "Start a conversation"}</p>
                 <p className="text-sm text-muted-foreground max-w-xs">
-                  {tl("Ask", "Ρώτησε")} {ownerName} {tl("about availability, stops, routes, or anything about", "για διαθεσιμότητα, στάσεις, διαδρομές ή οτιδήποτε σχετικά με")} {boatName}.
+                  {isOwnerMode
+                    ? "Open a customer thread above to reply."
+                    : `${tl("Ask", "Ρώτησε")} ${ownerName} ${tl("about availability, stops, routes, or anything about", "για διαθεσιμότητα, στάσεις, διαδρομές ή οτιδήποτε σχετικά με")} ${boatName}.`}
                 </p>
-                <div className="flex flex-wrap justify-center gap-2 mt-2">
-                  {suggestionIdeas.slice(0, 4).map((suggestion) => (
-                    <button
-                      key={suggestion}
-                      type="button"
-                      onClick={() => applySuggestion(suggestion)}
-                      className="rounded-full border border-aegean/30 bg-aegean/5 px-3 py-1.5 text-xs text-aegean hover:bg-aegean/10 transition-colors"
-                    >
-                      {suggestion}
-                    </button>
-                  ))}
-                </div>
+                {!isOwnerMode && (
+                  <div className="flex flex-wrap justify-center gap-2 mt-2">
+                    {suggestionIdeas.slice(0, 4).map((suggestion) => (
+                      <button
+                        key={suggestion}
+                        type="button"
+                        onClick={() => applySuggestion(suggestion)}
+                        className="rounded-full border border-aegean/30 bg-aegean/5 px-3 py-1.5 text-xs text-aegean hover:bg-aegean/10 transition-colors"
+                      >
+                        {suggestion}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="flex flex-col gap-4">
@@ -357,41 +410,39 @@ const Chat = () => {
                   <Bubble
                     key={msg.id}
                     msg={msg}
-                    ownerName={ownerName}
-                    customerName={customerName}
+                    ownerName={thread.ownerName}
+                    customerName={thread.customerName}
                   />
                 ))}
-                {isTyping && <TypingIndicator ownerName={ownerName} />}
                 <div ref={bottomRef} />
               </div>
             )}
           </ScrollArea>
 
-          {/* ── Input bar ── */}
           <div className="flex gap-3 items-center rounded-2xl border border-border bg-card p-2 shadow-card">
-            <CustomerAvatar name={customerName} />
+            {isOwnerMode ? <OwnerAvatar ownerName={ownerName} /> : <CustomerAvatar name={customerName} />}
             <Input
               ref={inputRef}
               className="flex-1 border-0 bg-transparent shadow-none focus-visible:ring-0 text-sm placeholder:text-muted-foreground"
-              placeholder={`${tl("Message", "Μήνυμα προς")} ${ownerName}…`}
+              placeholder={isOwnerMode ? `Reply to ${activeCustomerName}…` : `${tl("Message", "Μήνυμα προς")} ${ownerName}…`}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={handleKeyDown}
               maxLength={maxMessageLength}
               autoFocus
-              disabled={!sessionUser || !hasBoatContext || isSending}
+              disabled={!sessionUser || !thread?.id || (!hasBoatContext && !isOwnerMode) || isSending}
             />
             <Button
               size="icon"
               className="bg-gradient-accent text-accent-foreground shrink-0 rounded-xl"
               onClick={handleSend}
-              disabled={!draft.trim() || !sessionUser || !hasBoatContext || isSending}
+              disabled={!draft.trim() || !sessionUser || !thread?.id || (!hasBoatContext && !isOwnerMode) || isSending}
             >
               <Send className="h-4 w-4" />
             </Button>
           </div>
 
-          {sessionUser && hasBoatContext ? (
+          {!isOwnerMode && sessionUser && hasBoatContext ? (
             <div className="rounded-2xl border border-border/80 bg-card/80 p-3">
               <div className="flex items-center gap-2 mb-2">
                 <Lightbulb className="h-4 w-4 text-aegean" />
@@ -418,7 +469,7 @@ const Chat = () => {
           ) : null}
 
           <p className="text-center text-xs text-muted-foreground">
-            {tl("Messages are stored in Supabase", "Τα μηνύματα αποθηκεύονται στο Supabase")} · {boat?.owner.responseRate ?? 97}% {tl("response rate", "ποσοστό απόκρισης")}
+            {tl("Messages are stored in Supabase", "Τα μηνύματα αποθηκεύονται στο Supabase")}
           </p>
         </div>
       </main>
