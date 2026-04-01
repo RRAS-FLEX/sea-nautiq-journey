@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { useFavorites } from "@/hooks/useFavorites";
 import { buildBoatDetailsPath } from "@/lib/boats";
+import type { BoatOwner } from "@/lib/boats";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 interface BoatCardProps {
   id?: string;
@@ -16,9 +18,10 @@ interface BoatCardProps {
   rating: number;
   index: number;
   reviewCount?: number;
+  owner?: BoatOwner;
 }
 
-const BoatCard = ({ id, image, images, name, capacity, location, pricePerDay, rating, index, reviewCount }: BoatCardProps) => {
+const BoatCard = ({ id, image, images, name, capacity, location, pricePerDay, rating, index, reviewCount, owner }: BoatCardProps) => {
   const { isFavorite, toggleFavorite } = useFavorites();
   const favorited = id ? isFavorite(id) : false;
   const galleryImages = useMemo(() => {
@@ -115,22 +118,44 @@ const BoatCard = ({ id, image, images, name, capacity, location, pricePerDay, ra
           </button>
         )}
       </div>
-      <div className="p-4">
-        <h3 className="font-heading font-semibold text-foreground text-lg mb-1">{name}</h3>
-        <div className="flex items-center gap-3 text-muted-foreground text-sm mb-3">
-          <span className="flex items-center gap-1">
-            <MapPin className="h-3.5 w-3.5" />
-            {location}
-          </span>
-          <span className="flex items-center gap-1">
-            <Users className="h-3.5 w-3.5" />
-            {capacity} guests
-          </span>
-          {typeof reviewCount === "number" ? (
-            <span className="text-xs">{reviewCount} reviews</span>
-          ) : null}
+      <div className="p-4 space-y-4">
+        <div>
+          <h3 className="font-heading font-semibold text-foreground text-lg mb-1">{name}</h3>
+          <div className="flex items-center gap-3 text-muted-foreground text-sm">
+            <span className="flex items-center gap-1">
+              <MapPin className="h-3.5 w-3.5" />
+              {location}
+            </span>
+            <span className="flex items-center gap-1">
+              <Users className="h-3.5 w-3.5" />
+              {capacity} guests
+            </span>
+            {typeof reviewCount === "number" ? (
+              <span className="text-xs">{reviewCount} reviews</span>
+            ) : null}
+          </div>
         </div>
-        <div className="flex items-center justify-between">
+        
+        {owner && owner.name ? (
+          <div className="flex items-center gap-3 pt-2 border-t border-border">
+            <Avatar className="h-10 w-10 border border-border flex-shrink-0">
+              <AvatarFallback className="bg-aegean/10 text-aegean text-xs font-semibold">
+                {(owner.name || "Owner")
+                  .split(" ")
+                  .map((part) => part[0])
+                  .join("")
+                  .slice(0, 2)
+                  .toUpperCase()}
+              </AvatarFallback>
+            </Avatar>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-foreground truncate">{owner.name}</p>
+              <p className="text-xs text-muted-foreground truncate">{owner.title || "Boat Owner"}</p>
+            </div>
+          </div>
+        ) : null}
+        
+        <div className="flex items-center justify-between pt-2">
           <div>
             <span className="text-lg font-heading font-bold text-foreground">€{pricePerDay}</span>
             <span className="text-sm text-muted-foreground"> / day</span>

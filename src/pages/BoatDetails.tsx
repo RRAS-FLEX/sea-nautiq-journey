@@ -353,17 +353,18 @@ const BoatDetails = () => {
                     <div className="flex items-start gap-4">
                       <Avatar className="h-14 w-14 border border-border">
                         <AvatarFallback className="bg-aegean/10 text-aegean font-semibold">
-                          {boat.owner.name
+                          {(boat.owner.name || "Owner")
                             .split(" ")
                             .map((part) => part[0])
                             .join("")
-                            .slice(0, 2)}
+                            .slice(0, 2)
+                            .toUpperCase()}
                         </AvatarFallback>
                       </Avatar>
                       <div className="space-y-1 min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
                           <h2 className="font-heading text-lg font-semibold text-foreground">
-                            {tl("Hosted by", "Οικοδεσπότης")} {boat.owner.name}
+                            {tl("Hosted by", "Οικοδεσπότης")} {boat.owner.name || "Owner"}
                           </h2>
                           {boat.owner.isSuperhost ? (
                             <Badge className="bg-aegean text-primary-foreground">
@@ -372,7 +373,7 @@ const BoatDetails = () => {
                           ) : null}
                         </div>
                         <p className="text-sm text-muted-foreground break-words">
-                          {boat.owner.title} · {tl("member since", "μέλος από")} {boat.owner.joinedYear}
+                          {boat.owner.title || "Boat Owner"} · {tl("member since", "μέλος από")} {boat.owner.joinedYear}
                         </p>
                       </div>
                     </div>
@@ -392,26 +393,30 @@ const BoatDetails = () => {
                       </div>
                       <div className="rounded-2xl border border-border bg-background p-3">
                         <p className="text-muted-foreground text-[11px]">{tl("Languages", "Γλώσσες")}</p>
-                        <p className="font-semibold text-foreground">{boat.owner.languages.length}</p>
+                        <p className="font-semibold text-foreground">{(boat.owner.languages || []).length}</p>
                       </div>
                     </div>
 
-                    <p className="text-sm text-muted-foreground leading-relaxed">{boat.owner.bio}</p>
+                    {boat.owner.bio ? <p className="text-sm text-muted-foreground leading-relaxed">{boat.owner.bio}</p> : null}
 
-                    <div className="flex flex-wrap gap-2">
-                      {boat.owner.languages.map((language) => (
-                        <Badge key={language} variant="outline" className="text-xs">
-                          {language}
-                        </Badge>
-                      ))}
-                    </div>
+                    {boat.owner.languages && boat.owner.languages.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {boat.owner.languages.map((language) => (
+                          <Badge key={language} variant="outline" className="text-xs">
+                            {language}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null}
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <Button asChild variant="outline" className="w-full">
-                        <Link to={`/boats?owner=${encodeURIComponent(boat.owner.name)}`}>
-                          {tl("View all boats by this owner", "Δες όλα τα σκάφη του ιδιοκτήτη")}
-                        </Link>
-                      </Button>
+                      {boat.owner.name && (
+                        <Button asChild variant="outline" className="w-full">
+                          <Link to={`/boats?owner=${encodeURIComponent(boat.owner.name)}`}>
+                            {tl("View all boats by this owner", "Δες όλα τα σκάφη του ιδιοκτήτη")}
+                          </Link>
+                        </Button>
+                      )}
                       <Button asChild variant="outline" className="w-full">
                         <Link to={`/chat?boatRef=${encodeURIComponent(publicBoatRef)}&boat=${encodeURIComponent(boat.name)}`}>
                           <MessageCircle className="mr-2 h-4 w-4" />{tl("Chat with owner", "Συνομιλία με ιδιοκτήτη")}
@@ -497,11 +502,13 @@ const BoatDetails = () => {
                         <Flag className="mr-2 h-4 w-4" />{tl("Report this boat", "Αναφορά σκάφους")}
                       </Link>
                     </Button>
-                    <Button asChild variant="ghost" className="w-full justify-start text-muted-foreground hover:text-foreground">
-                      <Link to={`/report?type=owner&target=${encodeURIComponent(boat.owner.name)}&targetRef=${encodeURIComponent(publicBoatRef)}&subject=${encodeURIComponent(`Report owner for ${boat.name}`)}`}>
-                        <Flag className="mr-2 h-4 w-4" />{tl("Report this owner", "Αναφορά ιδιοκτήτη")}
-                      </Link>
-                    </Button>
+                    {boat.owner.name && (
+                      <Button asChild variant="ghost" className="w-full justify-start text-muted-foreground hover:text-foreground">
+                        <Link to={`/report?type=owner&target=${encodeURIComponent(boat.owner.name)}&targetRef=${encodeURIComponent(publicBoatRef)}&subject=${encodeURIComponent(`Report owner for ${boat.name}`)}`}>
+                          <Flag className="mr-2 h-4 w-4" />{tl("Report this owner", "Αναφορά ιδιοκτήτη")}
+                        </Link>
+                      </Button>
+                    )}
                   </div>
                 </CardContent>
               </Card>

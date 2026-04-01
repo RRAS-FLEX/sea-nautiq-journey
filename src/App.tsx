@@ -64,6 +64,16 @@ const RouteAnalyticsTracker = () => {
   return null;
 };
 
+const ScrollToTop = () => {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
+  return null;
+};
+
 const RoleLoadingScreen = () => (
   <div className="min-h-screen bg-background">
     <Navbar />
@@ -183,6 +193,7 @@ const AppRoutes = () => (
     <RouteTransitionLoader />
     <ConnectionStatusBanner />
     <RouteAnalyticsTracker />
+    <ScrollToTop />
     <RoutingDataProvider>
       <Suspense fallback={<RoutePageFallback />}>
         <Routes>

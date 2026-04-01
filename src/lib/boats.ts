@@ -84,6 +84,7 @@ type BoatRow = {
 	image?: string | null;
 	boat_features?: BoatFeatureRow[] | null;
 	users?: BoatUserRow | null;
+	owner?: BoatUserRow | null;
 };
 
 const BOATS_CACHE_KEY = "nautiq:boats-cache:v3";
@@ -253,6 +254,22 @@ const resolveBoatImages = (row: BoatRow): string[] => {
 
 const mapRow = (row: BoatRow): Boat => {
 	const resolvedImages = resolveBoatImages(row);
+	
+	// Use the aliased 'owner' relationship if available, fallback to 'users' for backward compatibility
+	const ownerData = (row as any).owner || row.users;
+	
+	// Ensure we have owner data - use the owner relationship if available
+	const ownerName = ownerData?.name?.trim() || "Owner";
+	const ownerTitle = (ownerData?.owner_title?.trim() as string | undefined) || "Boat Owner";
+	const ownerBio = (ownerData?.owner_bio?.trim() as string | undefined) || "";
+	const ownerLanguages = Array.isArray(ownerData?.owner_languages) && ownerData.owner_languages.length > 0 
+		? ownerData.owner_languages 
+		: ["English"];
+	const ownerIsSuperhost = Boolean(ownerData?.is_superhost);
+	const ownerResponseRate = Math.min(100, Math.max(0, Number(ownerData?.response_rate ?? 95)));
+	const ownerJoinedYear = ownerData?.created_at 
+		? new Date(ownerData.created_at).getFullYear() 
+		: new Date().getFullYear();
 
 	return {
 	id: row.id,
@@ -277,16 +294,14 @@ const mapRow = (row: BoatRow): Boat => {
 	cancellationPolicy: row.cancellation_policy ?? "Contact owner for details",
 	responseTime: row.response_time ?? "",
 	owner: {
-		name: row.users?.name ?? "Owner",
-		title: row.users?.owner_title ?? "Boat Owner",
-		joinedYear: row.users?.created_at
-			? new Date(row.users.created_at).getFullYear()
-			: new Date().getFullYear(),
+		name: ownerName,
+		title: ownerTitle,
+		joinedYear: ownerJoinedYear,
 		tripsHosted: Number(row.bookings ?? 0),
-		responseRate: Number(row.users?.response_rate ?? 95),
-		bio: row.users?.owner_bio ?? "",
-		languages: row.users?.owner_languages ?? ["English"],
-		isSuperhost: row.users?.is_superhost ?? false,
+		responseRate: ownerResponseRate,
+		bio: ownerBio,
+		languages: ownerLanguages,
+		isSuperhost: ownerIsSuperhost,
 	},
 	availability: {
 		unavailableDates: row.unavailable_dates ?? [],
@@ -300,9 +315,9 @@ const mapRow = (row: BoatRow): Boat => {
 };
 
 const BOAT_SELECT =
-	"*, boat_features(feature), users(name, owner_title, owner_bio, owner_languages, is_superhost, response_rate, created_at)";
+	"*, boat_features(feature), owner:owner_id(id, name, created_at, owner_title, owner_bio, owner_languages, is_superhost, response_rate)";
 const BOAT_SELECT_FALLBACK =
-	"*, users(name, created_at), boat_features(feature)";
+	"id, name, type, location, capacity, price_per_day, rating, images, image, bookings, status, created_at, owner:owner_id(id, name, created_at), boat_features(feature)";
 const BOAT_SELECT_MINIMAL =
 	"id, name, type, location, capacity, price_per_day, rating, images, image, skipper_required, bookings, revenue, status, created_at";
 

@@ -663,87 +663,25 @@ export const deleteOwnerPackage = async (id: string): Promise<boolean> => {
 };
 
 export const getOwnerCalendarEvents = async (boatId?: string): Promise<OwnerCalendarEvent[]> => {
-  const session = await getSession();
-  const boatsTable = (supabase as any).from("boats");
-  const calendarTable = (supabase as any).from("calendar_events");
-  const { data: ownedBoats, error: boatsError } = await boatsTable.select("id").eq("owner_id", session.user.id);
-
-  if (boatsError) {
-    throw new Error(boatsError.message || "Failed to load owner calendar");
-  }
-
-  const boatIds = Array.isArray(ownedBoats) ? ownedBoats.map((boat: any) => boat.id) : [];
-  if (boatIds.length === 0) {
-    return [];
-  }
-
-  let query = calendarTable.select("*").in("boat_id", boatIds).order("date", { ascending: true });
-  if (boatId) {
-    query = query.eq("boat_id", boatId);
-  }
-
-  const { data: events, error } = await query;
-  if (error) {
-    throw new Error(error.message || "Failed to load calendar events");
-  }
-
-  return Array.isArray(events)
-    ? events.map((event: any) => ({
-        id: event.id,
-        boatId: event.boat_id,
-        date: event.date,
-        type: event.type,
-        guestName: event.guest_name ?? undefined,
-        bookingId: event.booking_id ?? undefined,
-      }))
-    : [];
+  // Calendar events feature is disabled; return an empty list.
+  return [];
 };
 
 export const addCalendarEvent = async (event: Omit<OwnerCalendarEvent, "id">): Promise<OwnerCalendarEvent> => {
-  const session = await getSession();
-  const boatsTable = (supabase as any).from("boats");
-  const calendarTable = (supabase as any).from("calendar_events");
-  const { data: boat } = await boatsTable.select("id").eq("id", event.boatId).eq("owner_id", session.user.id).single();
-
-  if (!boat) {
-    throw new Error("You can only manage calendar events for your own boats");
-  }
-
-  const { data, error } = await calendarTable
-    .insert({
-      boat_id: event.boatId,
-      date: event.date,
-      type: event.type,
-      guest_name: event.guestName,
-      booking_id: event.bookingId,
-    })
-    .select()
-    .single();
-
-  if (error || !data) {
-    throw new Error(error?.message || "Failed to add calendar event");
-  }
-
+  // Calendar events feature is disabled; simulate a no-op add and echo parameters.
   return {
-    id: data.id,
-    boatId: data.boat_id,
-    date: data.date,
-    type: data.type,
-    guestName: data.guest_name ?? undefined,
-    bookingId: data.booking_id ?? undefined,
+    id: "disabled-calendar-event",
+    boatId: event.boatId,
+    date: event.date,
+    type: event.type,
+    guestName: event.guestName,
+    bookingId: event.bookingId,
   };
 };
 
 export const deleteCalendarEvent = async (id: string): Promise<boolean> => {
-  const session = await getSession();
-  const boatsTable = (supabase as any).from("boats");
-  const calendarTable = (supabase as any).from("calendar_events");
-  const { data: ownedBoats } = await boatsTable.select("id").eq("owner_id", session.user.id);
-  const boatIds = Array.isArray(ownedBoats) ? ownedBoats.map((boat: any) => boat.id) : [];
-  const { error } = await calendarTable.delete().eq("id", id).in("boat_id", boatIds);
-  if (error) {
-    throw new Error(error.message || "Failed to delete calendar event");
-  }
+  // Calendar events feature is disabled; treat delete as success.
+  void id;
   return true;
 };
 

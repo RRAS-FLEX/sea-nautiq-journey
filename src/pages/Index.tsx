@@ -15,9 +15,20 @@ const Index = () => {
 
   useSEO({
     title: "Nautiplex — Boat Rentals & Sea Experiences in Greece",
-    description: "Book verified boats in Greece instantly — Mykonos, Santorini, Thassos, Halkidiki & more. Motor yachts, catamarans, speedboats with trusted local owners. Best prices, no hidden fees.",
+    description:
+      "Book verified boats in Greece instantly — Mykonos, Santorini, Thassos, Halkidiki & more. Motor yachts, catamarans, speedboats with trusted local owners for EU and US travelers. Best prices, no hidden fees.",
     canonical: "https://nautiq.gr/",
-    keywords: "boat rental Greece, rent a boat Greece, yacht charter Greece, Greek islands sailing, sea experiences Greece",
+    keywords:
+      "boat rental Greece, rent a boat Greece, yacht charter Greece, Greek islands sailing, sea experiences Greece, boat rental Europe, boat rental for US travelers",
+    locale: "en_US",
+    hashtags: [
+      "boatRental",
+      "Greece",
+      "GreekIslands",
+      "YachtCharter",
+      "SeaExperiences",
+      "Nautiplex",
+    ],
   });
 
   const handleFindBoats = (criteria: BoatSearchCriteria) => {

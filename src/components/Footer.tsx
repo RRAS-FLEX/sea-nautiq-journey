@@ -1,5 +1,6 @@
 import NautiqLogo from "./NautiqLogo";
 import { Link } from "react-router-dom";
+import { Instagram, Facebook, Twitter, Music2 } from "lucide-react";
 
 const Footer = () => {
   return (
@@ -48,8 +49,46 @@ const Footer = () => {
             </ul>
           </div>
         </div>
-        <div className="border-t border-border mt-10 pt-6 text-center text-xs text-muted-foreground">
-          © 2026 Nautiplex. All rights reserved.
+        <div className="border-t border-border mt-10 pt-6 flex flex-col md:flex-row items-center justify-between gap-4 text-xs text-muted-foreground">
+          <p>© 2026 Nautiplex. All rights reserved.</p>
+          <div className="flex items-center gap-4">
+            <a
+              href="https://instagram.com/nautiplex"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Nautiplex on Instagram"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Instagram className="h-4 w-4" />
+            </a>
+            <a
+              href="https://tiktok.com/@nautiplex"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Nautiplex on TikTok"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Music2 className="h-4 w-4" />
+            </a>
+            <a
+              href="https://facebook.com/nautiplex"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Nautiplex on Facebook"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Facebook className="h-4 w-4" />
+            </a>
+            <a
+              href="https://twitter.com/nautiplex"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Nautiplex on X (Twitter)"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <Twitter className="h-4 w-4" />
+            </a>
+          </div>
         </div>
       </div>
     </footer>

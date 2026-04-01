@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { CalendarCheck2, Mail, MessageCircle, ShieldCheck } from "lucide-react";
 import Navbar from "@/components/Navbar";
@@ -6,8 +7,22 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
+type ResolvedBooking = {
+  bookingId: string;
+  boat: string;
+  date: string;
+  departure: string;
+  amount: number;
+  ownerNotified: boolean;
+  emailQueued: boolean;
+};
+
 const BookingConfirmed = () => {
   const [searchParams] = useSearchParams();
+
+  const [resolvedBooking, setResolvedBooking] = useState<ResolvedBooking | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const bookingId = searchParams.get("bookingId") ?? "";
   const boat = searchParams.get("boat") ?? "Boat";
@@ -16,6 +31,61 @@ const BookingConfirmed = () => {
   const amount = searchParams.get("amount") ?? "";
   const emailQueued = searchParams.get("emailQueued") === "true";
   const ownerNotified = searchParams.get("ownerNotified") === "true";
+  const stripeSessionId = searchParams.get("session_id") ?? searchParams.get("sessionId") ?? "";
+
+  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
+  const bookingLookupEndpoint = apiBaseUrl
+    ? `${apiBaseUrl.replace(/\/$/, "")}/api/bookings/by-stripe-session`
+    : "/api/bookings/by-stripe-session";
+
+  useEffect(() => {
+    if (!stripeSessionId) {
+      return;
+    }
+
+    let cancelled = false;
+    const loadBooking = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const response = await fetch(`${bookingLookupEndpoint}?session_id=${encodeURIComponent(stripeSessionId)}`);
+        if (!response.ok) {
+          throw new Error("Failed to load booking details for this payment session.");
+        }
+
+        const data: ResolvedBooking = await response.json();
+        if (!cancelled) {
+          setResolvedBooking(data);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : "Failed to load booking details.";
+          setError(message);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadBooking();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [stripeSessionId, bookingLookupEndpoint]);
+
+  const effectiveBookingId = resolvedBooking?.bookingId || bookingId;
+  const effectiveBoat = resolvedBooking?.boat || boat;
+  const effectiveDate = resolvedBooking?.date || date;
+  const effectiveDeparture = resolvedBooking?.departure || departure;
+  const effectiveAmount =
+    resolvedBooking && Number.isFinite(resolvedBooking.amount)
+      ? String(resolvedBooking.amount)
+      : amount;
+  const effectiveOwnerNotified = resolvedBooking?.ownerNotified ?? ownerNotified;
+  const effectiveEmailQueued = resolvedBooking?.emailQueued ?? emailQueued;
 
   return (
     <div className="min-h-screen bg-background">
@@ -30,7 +100,7 @@ const BookingConfirmed = () => {
                   <CalendarCheck2 className="h-5 w-5 text-aegean" />
                   Booking confirmed
                 </CardTitle>
-                <Badge className="bg-aegean/10 text-aegean border-aegean/30">Reference {bookingId || "pending"}</Badge>
+                <Badge className="bg-aegean/10 text-aegean border-aegean/30">Reference {effectiveBookingId || "pending"}</Badge>
               </div>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -38,24 +108,31 @@ const BookingConfirmed = () => {
                 Your trip is secured. We lock this slot immediately to avoid overlaps and keep your booking reliable.
               </p>
 
+              {isLoading ? (
+                <p className="text-xs text-muted-foreground">Loading payment confirmation details…</p>
+              ) : null}
+              {error ? (
+                <p className="text-xs text-destructive">{error}</p>
+              ) : null}
+
               <div className="rounded-2xl border border-border bg-muted/20 p-4 space-y-2 text-sm">
-                <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">Boat</span><span className="font-medium text-foreground">{boat}</span></div>
-                <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">Date</span><span className="font-medium text-foreground">{date || "-"}</span></div>
-                <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">Departure</span><span className="font-medium text-foreground">{departure || "-"}</span></div>
-                <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">Paid now</span><span className="font-medium text-foreground">€{amount || "0"}</span></div>
+                <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">Boat</span><span className="font-medium text-foreground">{effectiveBoat}</span></div>
+                <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">Date</span><span className="font-medium text-foreground">{effectiveDate || "-"}</span></div>
+                <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">Departure</span><span className="font-medium text-foreground">{effectiveDeparture || "-"}</span></div>
+                <div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">Paid now</span><span className="font-medium text-foreground">€{effectiveAmount || "0"}</span></div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="rounded-2xl border border-border p-4 bg-background">
                   <p className="text-sm font-medium text-foreground flex items-center gap-2"><MessageCircle className="h-4 w-4 text-aegean" />Owner notification</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {ownerNotified ? "Sent to owner queue." : "Pending owner notification."}
+                    {effectiveOwnerNotified ? "Sent to owner queue." : "Pending owner notification."}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-border p-4 bg-background">
                   <p className="text-sm font-medium text-foreground flex items-center gap-2"><Mail className="h-4 w-4 text-aegean" />Customer email</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {emailQueued ? "Confirmation email queued." : "In-app confirmation active."}
+                    {effectiveEmailQueued ? "Confirmation email queued." : "In-app confirmation active."}
                   </p>
                 </div>
               </div>
@@ -63,6 +140,14 @@ const BookingConfirmed = () => {
               <div className="rounded-2xl border border-aegean/30 bg-aegean/5 p-4 text-sm text-foreground flex items-start gap-2">
                 <ShieldCheck className="h-4 w-4 text-aegean mt-0.5 shrink-0" />
                 <span>Trust-first protection: overlapping bookings are blocked before confirmation, and live availability updates are applied in real time.</span>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-muted/20 p-4 text-sm text-foreground">
+                <p className="font-medium">Cancellation & refund workflow</p>
+                <p className="text-muted-foreground mt-1">
+                  Need to cancel later? Open <span className="font-medium text-foreground">My bookings</span> and use <span className="font-medium text-foreground">Cancel booking</span>.
+                  Refunds are processed automatically: 100% refund when cancelled 48+ hours before trip start, otherwise 50%.
+                </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

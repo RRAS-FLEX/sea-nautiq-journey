@@ -11,12 +11,15 @@ import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { buildBoatDetailsPath, buildBoatPublicSlug, getBoats } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
 import {
+  cancelCustomerBooking,
   getCustomerBookingHistory,
   getOwnerSalesHistory,
+  type CancelBookingResult,
   type CustomerHistoryItem,
   type OwnerSalesHistoryItem,
 } from "@/lib/history";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useToast } from "@/hooks/use-toast";
 
 const isReviewEligible = (booking: CustomerHistoryItem) => {
   const tripDate = new Date(booking.startDate);
@@ -28,11 +31,14 @@ const isReviewEligible = (booking: CustomerHistoryItem) => {
 
 const History = () => {
   const { tl } = useLanguage();
+  const { toast } = useToast();
   const { user, isLoading } = useCurrentUser();
   const [customerHistory, setCustomerHistory] = useState<CustomerHistoryItem[]>([]);
   const [salesHistory, setSalesHistory] = useState<OwnerSalesHistoryItem[]>([]);
   const [boats, setBoats] = useState<Boat[]>([]);
   const [historyError, setHistoryError] = useState("");
+  const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
+  const [cancelResults, setCancelResults] = useState<Record<string, CancelBookingResult>>({});
 
   useEffect(() => {
     getBoats().then(setBoats).catch(() => setBoats([]));
@@ -92,6 +98,67 @@ const History = () => {
   const getBoatReference = (boatId: string) => {
     const matchingBoat = getBoatById(boatId);
     return matchingBoat ? matchingBoat.publicSlug || buildBoatPublicSlug(matchingBoat) : boatId;
+  };
+
+  const canCancelBooking = (booking: CustomerHistoryItem) => {
+    if (!["pending", "confirmed"].includes(booking.status)) {
+      return false;
+    }
+
+    const tripDate = new Date(booking.startDate);
+    return tripDate.getTime() > Date.now();
+  };
+
+  const handleCancelBooking = async (booking: CustomerHistoryItem) => {
+    const accepted = window.confirm(
+      `Cancel booking for ${booking.boatName} on ${new Date(booking.startDate).toLocaleDateString()}?`,
+    );
+
+    if (!accepted) {
+      return;
+    }
+
+    setCancellingBookingId(booking.id);
+    try {
+      const result = await cancelCustomerBooking({
+        bookingId: booking.id,
+        reason: "customer-request",
+      });
+
+      setCancelResults((current) => ({
+        ...current,
+        [booking.id]: result,
+      }));
+
+      setCustomerHistory((current) =>
+        current.map((entry) =>
+          entry.id === booking.id
+            ? {
+                ...entry,
+                status: "cancelled",
+              }
+            : entry,
+        ),
+      );
+
+      const refundMessage = result.refundAmount > 0
+        ? `Refund initiated: €${result.refundAmount.toFixed(2)} (${result.refundRatePercent}%).`
+        : "Booking cancelled. No payment refund was required.";
+
+      toast({
+        title: "Booking cancelled",
+        description: refundMessage,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to cancel booking";
+      toast({
+        title: "Cancellation failed",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setCancellingBookingId(null);
+    }
   };
 
   return (
@@ -185,11 +252,26 @@ const History = () => {
                         <div>
                           <p className="font-medium text-foreground">{new Date(booking.startDate).toLocaleDateString()}</p>
                           <p className="text-sm text-muted-foreground">{tl("Total paid", "Συνολικό ποσό")}: €{booking.totalPrice}</p>
+                          {cancelResults[booking.id]?.refundAmount ? (
+                            <p className="text-xs text-aegean mt-1">
+                              Refund: €{cancelResults[booking.id].refundAmount.toFixed(2)} ({cancelResults[booking.id].refundRatePercent}%)
+                            </p>
+                          ) : null}
                         </div>
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                           <Button asChild variant="outline">
                             <Link to={getBoatPath(booking.boatId)}>{tl("Boat details", "Λεπτομέρειες σκάφους")}</Link>
                           </Button>
+                          {canCancelBooking(booking) ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => handleCancelBooking(booking)}
+                              disabled={cancellingBookingId === booking.id}
+                            >
+                              {cancellingBookingId === booking.id ? "Cancelling..." : "Cancel booking"}
+                            </Button>
+                          ) : null}
                           {isReviewEligible(booking) ? (
                             <Button asChild className="bg-gradient-accent text-accent-foreground">
                               <Link to={`/post-trip-review?bookingId=${encodeURIComponent(booking.id)}&boatRef=${encodeURIComponent(getBoatReference(booking.boatId))}&boat=${encodeURIComponent(booking.boatName)}`}>{tl("Leave review", "Αφήστε αξιολόγηση")}</Link>

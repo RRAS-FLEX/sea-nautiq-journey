@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { confirmBookingWorkflow, getRecommendedDepartureTimes, type ConfirmBookingResult, type DepartureRecommendation } from "@/lib/booking-workflow";
+import { confirmBookingWorkflow, getAvailableDepartureTimes, getRecommendedDepartureTimes, type ConfirmBookingResult, type DepartureRecommendation } from "@/lib/booking-workflow";
 import { buildBoatDetailsPath, buildBoatPublicSlug, getBoatByPublicReference, getBoats } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
 import { trackBookingConfirmed, trackBookingStarted } from "@/lib/analytics";
@@ -34,7 +34,7 @@ type PaymentMethod = "stripe" | "manual";
 
 const paymentMethodOptions: Array<{ id: PaymentMethod; label: string; description: string }> = [
   { id: "stripe", label: "Stripe Checkout", description: "Card, Apple Pay, Google Pay, and more" },
-  { id: "manual", label: "Pay at harbor", description: "Reserve now, pay in cash or card on arrival" },
+  { id: "manual", label: "Choose payment plan", description: "Reserve now, pay in cash or card on arrival" },
 ];
 
 type OwnerPackageJoinRow = {
@@ -116,7 +116,7 @@ const Booking = () => {
   const [selectedExtras, setSelectedExtras] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(initialSelectedDate);
   const [hasDateIntent, setHasDateIntent] = useState(Boolean(initialSelectedDate));
-  const [departureTime, setDepartureTime] = useState("10:00");
+  const [departureTime, setDepartureTime] = useState("");
   const [customerName, setCustomerName] = useState(sessionUser?.name ?? "");
   const [customerEmail, setCustomerEmail] = useState(sessionUser?.email ?? "");
   const [specialRequests, setSpecialRequests] = useState("");
@@ -129,6 +129,7 @@ const Booking = () => {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
   const [paymentPlan, setPaymentPlan] = useState<"deposit" | "full" | null>(null);
   const [bookingStep, setBookingStep] = useState<1 | 2 | 3 | 4>(1);
+  const [autoUnavailableDates, setAutoUnavailableDates] = useState<Date[]>([]);
 
   useEffect(() => {
     if (sessionUser?.name && !customerName) {
@@ -190,10 +191,21 @@ const Booking = () => {
     .reduce((total, item) => total + item.price, 0);
   const crazySeaRoutingFee = selectedPackageId === "full-day" ? 95 : 0;
   const suggestedFuelLitres = Math.min(120, selectedPackage.baseFuelLitres + Math.max(guestCount - 4, 0) * 2);
-  const unavailableDates = useMemo(
+  const staticUnavailableDates = useMemo(
     () => boat?.availability.unavailableDates.map((date) => parseISO(date)) ?? [],
     [boat],
   );
+  const unavailableDates = useMemo(() => {
+    const combined = [...staticUnavailableDates, ...autoUnavailableDates];
+    if (combined.length === 0) return combined;
+    const seen = new Set<number>();
+    return combined.filter((date) => {
+      const key = startOfDay(date).getTime();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [staticUnavailableDates, autoUnavailableDates]);
   const nextAvailableDate = useMemo(() => {
     return Array.from({ length: 21 }, (_, index) => addDays(startOfDay(new Date()), index)).find(
       (date) => !unavailableDates.some((blockedDate) => isSameDay(blockedDate, date)),
@@ -244,6 +256,48 @@ const Booking = () => {
   );
 
   useEffect(() => {
+    if (!boat?.id) {
+      setAutoUnavailableDates([]);
+      return;
+    }
+
+    let cancelled = false;
+    const computeAutoUnavailable = async () => {
+      const today = startOfDay(new Date());
+      const horizonDays = 30;
+      const daysToCheck = Array.from({ length: horizonDays }, (_, index) => addDays(today, index));
+
+      const dynamicDates: Date[] = [];
+      for (const date of daysToCheck) {
+        if (cancelled) return;
+
+        // Skip dates already statically unavailable
+        if (staticUnavailableDates.some((blockedDate) => isSameDay(blockedDate, date))) {
+          continue;
+        }
+
+        const isoDate = format(date, "yyyy-MM-dd");
+        const availableTimes = await getAvailableDepartureTimes(boat.id, isoDate, selectedPackage.hours);
+        if (cancelled) return;
+
+        if (availableTimes.length === 0) {
+          dynamicDates.push(date);
+        }
+      }
+
+      if (!cancelled) {
+        setAutoUnavailableDates(dynamicDates);
+      }
+    };
+
+    computeAutoUnavailable();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [boat?.id, selectedPackage.hours, staticUnavailableDates]);
+
+  useEffect(() => {
     let cancelled = false;
 
     const loadAvailableTimes = async () => {
@@ -285,7 +339,7 @@ const Booking = () => {
         setAvailableDepartureTimes(nextTimes);
 
         if (nextTimes.length > 0) {
-          setDepartureTime((current) => (nextTimes.includes(current) ? current : nextTimes[0]));
+          setDepartureTime((current) => (nextTimes.includes(current) ? current : ""));
           return;
         }
 
@@ -437,18 +491,28 @@ const Booking = () => {
 
     if (paymentMethod === "stripe") {
       try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
         const checkoutResponse = await fetch(stripeCheckoutEndpoint, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
           },
           body: JSON.stringify({
             boatId: boat.id,
             boatName: boat.name,
             customerEmail: customerEmail.trim().toLowerCase(),
-            bookingDate: selectedDate.toISOString().slice(0, 10),
+            customerId: sessionUser?.id,
+            bookingDate: format(selectedDate, "yyyy-MM-dd"),
             departureTime,
             packageHours: selectedPackage.hours,
+            totalPrice: estimatedTotal,
+            amountDueNow,
+            paymentPlan,
+            depositAmount,
             successUrl: `${window.location.origin}/booking-confirmed`,
             cancelUrl: window.location.href,
           }),
@@ -504,13 +568,13 @@ const Booking = () => {
       result = await confirmBookingWorkflow({
         boatId: boat.id,
         boatName: boat.name,
-        ownerName: boat.owner.name,
+        ownerName: boat.owner.name || "Owner",
         customerName: customerName.trim(),
         customerEmail: customerEmail.trim().toLowerCase(),
         packageLabel: selectedPackage.label,
         packageHours: selectedPackage.hours,
         guests: guestCount,
-        date: selectedDate.toISOString().slice(0, 10),
+        date: format(selectedDate, "yyyy-MM-dd"),
         departureTime,
         departureMarina: boat.departureMarina,
         totalPrice: estimatedTotal,
@@ -528,7 +592,7 @@ const Booking = () => {
       const message = error instanceof Error ? error.message : "Could not confirm booking";
       if (message.toLowerCase().includes("no longer available") || message.toLowerCase().includes("operating hours")) {
         navigate(
-          `/booking-closed?boat=${encodeURIComponent(boat.name)}&date=${encodeURIComponent(selectedDate.toISOString().slice(0, 10))}&reason=${encodeURIComponent("slot-unavailable")}`,
+          `/booking-closed?boat=${encodeURIComponent(boat.name)}&date=${encodeURIComponent(format(selectedDate, "yyyy-MM-dd"))}&reason=${encodeURIComponent("slot-unavailable")}`,
         );
         return;
       }
@@ -656,13 +720,16 @@ const Booking = () => {
 
                 <div className="rounded-2xl border border-border p-4 bg-muted/10 space-y-5">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-foreground">Sector 2: Trip date &amp; departure</p>
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-foreground">Sector 2: Trip date &amp; departure</p>
+                      <p className="text-xs text-muted-foreground">Pick your trip day, a free departure time, and how many guests join.</p>
+                    </div>
                     <Badge variant="outline">Schedule</Badge>
                   </div>
 
                   {/* Quick date shortcuts */}
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-xs text-muted-foreground shrink-0">Jump to:</p>
+                    <p className="text-xs text-muted-foreground shrink-0">Jump to a good option:</p>
                     {([
                       { label: "Next available", date: nextAvailableDate },
                       {
@@ -707,9 +774,14 @@ const Booking = () => {
                     {/* Calendar with visual unavailability */}
                     <div className="rounded-3xl border border-border p-3 md:p-4 bg-muted/20 space-y-3">
                       <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-medium text-foreground">Pick date</p>
-                        <p className="text-xs text-muted-foreground">
-                          {nextAvailableDate ? `Next open: ${format(nextAvailableDate, "d MMM")}` : "Ask owner"}
+                        <div className="space-y-0.5">
+                          <p className="text-sm font-medium text-foreground">Pick date</p>
+                          <p className="text-xs text-muted-foreground">
+                            {nextAvailableDate ? `Soonest available: ${format(nextAvailableDate, "d MMM")}` : "Chat with the owner if your date looks blocked."}
+                          </p>
+                        </div>
+                        <p className="hidden md:block text-[11px] text-muted-foreground text-right">
+                          Grey dates are in the past, red are already booked.
                         </p>
                       </div>
                       <div className="overflow-x-auto pb-1">
@@ -745,7 +817,7 @@ const Booking = () => {
                         </span>
                         <span className="flex items-center gap-1.5 pt-2 text-destructive/80">
                           <span className="inline-block h-3 w-3 rounded-full bg-destructive/15 border border-destructive/30" />
-                          Owner unavailable
+                          {boat ? `${(boat.owner.name || "Owner").split(' ')[0]} unavailable` : "Owner unavailable"}
                         </span>
                         <span className="flex items-center gap-1.5 pt-2 opacity-50">
                           <span className="inline-block h-3 w-3 rounded-full bg-muted border border-border" />
@@ -766,12 +838,12 @@ const Booking = () => {
                             <button
                               key={slot}
                               type="button"
-                              disabled={!availableDepartureTimes.includes(slot)}
+                              disabled={!selectedDate || !availableDepartureTimes.includes(slot)}
                               onClick={() => setDepartureTime(slot)}
                               className={`text-xs rounded-xl border py-2 transition-colors ${
                                 departureTime === slot
                                   ? "border-aegean bg-aegean/10 text-aegean font-semibold"
-                                  : availableDepartureTimes.includes(slot)
+                                  : selectedDate && availableDepartureTimes.includes(slot)
                                     ? "border-border hover:border-aegean/50 text-muted-foreground hover:text-foreground"
                                     : "border-border text-muted-foreground/40 cursor-not-allowed"
                               }`}
@@ -783,9 +855,11 @@ const Booking = () => {
                         <p className="text-xs text-muted-foreground">
                           {isLoadingDepartureTimes
                             ? "Checking free departure windows…"
-                            : availableDepartureTimes.length > 0
-                              ? `Free starts for ${selectedPackage.hours}h trip: ${availableDepartureTimes.length}`
-                              : "No valid slots for this date and package."}
+                            : !selectedDate
+                              ? "Choose a date first to see which departure times are free."
+                              : availableDepartureTimes.length > 0
+                                ? `Free starts for ${selectedPackage.hours}h trip: ${availableDepartureTimes.length}`
+                                : "No valid slots for this date and package—try another day or package length."}
                         </p>
                         {liveAvailabilityNotice ? (
                           <p className="text-xs text-aegean">
@@ -850,7 +924,11 @@ const Booking = () => {
                           <Clock className="h-4 w-4 text-aegean shrink-0" />
                           <div>
                             <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Departure</p>
-                            <p className="text-sm font-semibold text-foreground">{departureTime} · {boat?.departureMarina ?? "marina"}</p>
+                            <p className="text-sm font-semibold text-foreground">
+                              {departureTime
+                                ? `${departureTime} · ${boat?.departureMarina ?? "marina"}`
+                                : "Select a departure time"}
+                            </p>
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
@@ -860,20 +938,22 @@ const Booking = () => {
                             <p className="text-sm font-semibold text-foreground">{guestCount}</p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 sm:ml-auto">
-                          <CalendarDays className="h-4 w-4 text-muted-foreground shrink-0" />
-                          <div>
-                            <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Est. return</p>
-                            <p className="text-sm font-semibold text-foreground">
-                              {(() => {
-                                const [h, m] = departureTime.split(":").map(Number);
-                                const dep = new Date(selectedDate);
-                                dep.setHours(h, m, 0, 0);
-                                return format(addHours(dep, selectedPackage.hours), "HH:mm");
-                              })()}
-                            </p>
+                        {departureTime ? (
+                          <div className="flex items-center gap-2 sm:ml-auto">
+                            <CalendarDays className="h-4 w-4 text-muted-foreground shrink-0" />
+                            <div>
+                              <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Est. return</p>
+                              <p className="text-sm font-semibold text-foreground">
+                                {(() => {
+                                  const [h, m] = departureTime.split(":").map(Number);
+                                  const dep = new Date(selectedDate);
+                                  dep.setHours(h, m, 0, 0);
+                                  return format(addHours(dep, selectedPackage.hours), "HH:mm");
+                                })()}
+                              </p>
+                            </div>
                           </div>
-                        </div>
+                        ) : null}
                       </div>
                     ) : (
                       <p className="text-sm text-muted-foreground text-center py-1">Choose a date and departure time above to see your schedule</p>
@@ -1171,7 +1251,51 @@ const Booking = () => {
               </CardContent>
             </Card>
 
-              <Card className="shadow-card h-fit">
+            {boat ? (
+              <div className="space-y-6 lg:col-span-1">
+                <Card className="shadow-card h-fit">
+                  <CardHeader>
+                    <CardTitle>Meet your host</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-start gap-3">
+                      <Avatar className="h-12 w-12 border border-border">
+                        <AvatarFallback className="bg-aegean/10 text-aegean font-semibold">
+                          {(boat.owner.name || "Owner")
+                            .split(" ")
+                            .map((part) => part[0])
+                            .join("")
+                            .slice(0, 2)
+                            .toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="font-semibold text-foreground">{boat.owner.name || "Owner"}</p>
+                          {boat.owner.isSuperhost ? <Badge className="bg-aegean text-primary-foreground">Guest favorite</Badge> : null}
+                        </div>
+                        <p className="text-sm text-muted-foreground">{boat.owner.title || "Boat Owner"}</p>
+                      </div>
+                    </div>
+                    {boat.owner.bio ? <p className="text-sm text-muted-foreground">{boat.owner.bio}</p> : null}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center text-sm">
+                      <div className="rounded-2xl border border-border p-3">
+                        <p className="text-xs text-muted-foreground">Trips</p>
+                        <p className="font-semibold text-foreground">{boat.owner.tripsHosted}</p>
+                      </div>
+                      <div className="rounded-2xl border border-border p-3">
+                        <p className="text-xs text-muted-foreground">Response</p>
+                        <p className="font-semibold text-foreground">{boat.owner.responseRate}%</p>
+                      </div>
+                      <div className="rounded-2xl border border-border p-3">
+                        <p className="text-xs text-muted-foreground">Rating</p>
+                        <p className="font-semibold text-foreground flex items-center justify-center gap-1"><Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />{boat.rating}</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card className="shadow-card h-fit">
               <CardHeader>
                 <CardTitle>Payment summary</CardTitle>
               </CardHeader>
@@ -1218,7 +1342,7 @@ const Booking = () => {
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Payment method</span>
-                    <span className="text-foreground font-medium">{paymentMethod === "stripe" ? "Stripe Checkout" : paymentMethod === "manual" ? "Pay at harbor" : "Choose method"}</span>
+                    <span className="text-foreground font-medium">{paymentMethod === "stripe" ? "Stripe Checkout" : paymentMethod === "manual" ? "Choose payment plan" : "Choose method"}</span>
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">Payment plan</span>
@@ -1308,90 +1432,42 @@ const Booking = () => {
               </CardContent>
             </Card>
 
-            {boat ? (
-              <>
-                <Card className="shadow-card h-fit">
-                  <CardHeader>
-                    <CardTitle>Meet your host</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-start gap-3">
-                      <Avatar className="h-12 w-12 border border-border">
-                        <AvatarFallback className="bg-aegean/10 text-aegean font-semibold">
-                          {boat.owner.name
-                            .split(" ")
-                            .map((part) => part[0])
-                            .join("")
-                            .slice(0, 2)}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-semibold text-foreground">{boat.owner.name}</p>
-                          {boat.owner.isSuperhost ? <Badge className="bg-aegean text-primary-foreground">Guest favorite</Badge> : null}
-                        </div>
-                        <p className="text-sm text-muted-foreground">{boat.owner.title}</p>
-                      </div>
-                    </div>
-                    <p className="text-sm text-muted-foreground">{boat.owner.bio}</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-center text-sm">
-                      <div className="rounded-2xl border border-border p-3">
-                        <p className="text-xs text-muted-foreground">Trips</p>
-                        <p className="font-semibold text-foreground">{boat.owner.tripsHosted}</p>
-                      </div>
-                      <div className="rounded-2xl border border-border p-3">
-                        <p className="text-xs text-muted-foreground">Response</p>
-                        <p className="font-semibold text-foreground">{boat.owner.responseRate}%</p>
-                      </div>
-                      <div className="rounded-2xl border border-border p-3">
-                        <p className="text-xs text-muted-foreground">Rating</p>
-                        <p className="font-semibold text-foreground flex items-center justify-center gap-1"><Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />{boat.rating}</p>
-                      </div>
-                    </div>
-                    {!workflowResult ? (
-                      <p className="text-xs text-muted-foreground rounded-xl border border-border p-3">
-                        Chat with owner becomes available after booking confirmation.
-                      </p>
-                    ) : null}
-                  </CardContent>
-                </Card>
-
-                <Card className="relative z-0 shadow-card h-fit overflow-hidden">
-                  <div className="relative z-0 aspect-[4/3] border-b border-border overflow-hidden">
-                    <BoatLocationMap
-                      points={[
-                        {
-                          id: boat.id,
-                          name: boat.name,
-                          query: boat.mapQuery,
-                          subtitle: `${boat.departureMarina} • ${boat.location}`,
-                        },
-                      ]}
-                      selectedPointId={boat.id}
-                      emptyLabel="Meeting point map is unavailable."
-                      loadingLabel="Loading meeting point map…"
-                      heightClassName="h-full"
-                    />
-                  </div>
-                  <CardHeader>
-                    <CardTitle>Meeting point</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div>
-                      <p className="font-medium text-foreground">{boat.departureMarina}</p>
-                      <p className="text-sm text-muted-foreground">{boat.location}, Greece</p>
-                    </div>
-                    <div className="grid grid-cols-1 gap-3">
-                      <Button asChild className="bg-gradient-accent text-accent-foreground">
-                        <a href={googleDirectionsUrl} target="_blank" rel="noreferrer">
-                          <Navigation className="mr-2 h-4 w-4" />
-                          Open directions
-                        </a>
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </>
+            <Card className="relative z-0 shadow-card h-fit overflow-hidden">
+              <div className="relative z-0 aspect-[4/3] border-b border-border overflow-hidden">
+                <BoatLocationMap
+                  points={[
+                    {
+                      id: boat.id,
+                      name: boat.name,
+                      query: boat.mapQuery,
+                      subtitle: `${boat.departureMarina} • ${boat.location}`,
+                    },
+                  ]}
+                  selectedPointId={boat.id}
+                  emptyLabel="Meeting point map is unavailable."
+                  loadingLabel="Loading meeting point map…"
+                  heightClassName="h-full"
+                />
+              </div>
+              <CardHeader>
+                <CardTitle>Meeting point</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <p className="font-medium text-foreground">{boat.departureMarina}</p>
+                  <p className="text-sm text-muted-foreground">{boat.location}, Greece</p>
+                </div>
+                <div className="grid grid-cols-1 gap-3">
+                  <Button asChild className="bg-gradient-accent text-accent-foreground">
+                    <a href={googleDirectionsUrl} target="_blank" rel="noreferrer">
+                      <Navigation className="mr-2 h-4 w-4" />
+                      Open directions
+                    </a>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
             ) : null}
           </div>
         </section>

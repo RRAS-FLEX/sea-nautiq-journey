@@ -53,7 +53,7 @@ const DOCUMENT_LABELS = [
   "Port Authority Permit",
 ];
 
-const FORM_STEPS = ["Basics", "Details", "Media & Features", "Documents"];
+const BASE_FORM_STEPS = ["Basics", "Details", "Media & Features", "Documents"];
 const QUICK_EXTRA_SUGGESTIONS = [
   { name: "Champagne", price: 60 },
   { name: "Fruit platter", price: 35 },
@@ -73,6 +73,7 @@ const createLocalId = () => {
 const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
   const { toast } = useToast();
   const isEdit = Boolean(boat);
+  const formSteps = isEdit ? BASE_FORM_STEPS.slice(0, 3) : BASE_FORM_STEPS;
   const docInputRef = useRef<HTMLInputElement>(null);
   const [currentStep, setCurrentStep] = useState(1);
 
@@ -86,8 +87,7 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
     cruisingSpeedKnots: boat?.cruisingSpeedKnots ?? 22,
     fuelBurnLitresPerHour: boat?.fuelBurnLitresPerHour ?? 16,
     departureMarina: boat?.departureMarina ?? "",
-    cancellationPolicy: boat?.cancellationPolicy ?? "Free cancellation up to 72 hours before departure",
-    responseTime: boat?.responseTime ?? "Usually replies within 30 minutes",
+    cancellationPolicy: Number(boat?.cancellationPolicy) || 72,
     mapQuery: boat?.mapQuery ?? "",
     unavailableDatesInput: (boat?.unavailableDates ?? []).join(", "),
     minNoticeHours: boat?.minNoticeHours ?? 24,
@@ -245,8 +245,7 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
         formData.cruisingSpeedKnots > 0 &&
         formData.fuelBurnLitresPerHour >= 0 &&
         formData.departureMarina.trim().length > 0 &&
-        formData.cancellationPolicy.trim().length > 0 &&
-        formData.responseTime.trim().length > 0 &&
+        formData.cancellationPolicy >= 0 &&
         formData.mapQuery.trim().length > 0 &&
         formData.minNoticeHours >= 0
       );
@@ -260,7 +259,7 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
       return;
     }
 
-    setCurrentStep((step) => Math.min(FORM_STEPS.length, step + 1));
+    setCurrentStep((step) => Math.min(formSteps.length, step + 1));
   };
 
   const handlePrevStep = () => {
@@ -269,6 +268,22 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isSubmitting) {
+      return;
+    }
+
+    // If user hits Enter or something submits before final step,
+    // just treat it as "Next" instead of saving.
+    if (currentStep < formSteps.length) {
+      if (!validateStep(currentStep)) {
+        return;
+      }
+
+      setCurrentStep((step) => Math.min(formSteps.length, step + 1));
+      return;
+    }
+
     setIsSubmitting(true);
     const unavailableDates = formData.unavailableDatesInput
       .split(",")
@@ -285,8 +300,8 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
       cruisingSpeedKnots: formData.cruisingSpeedKnots,
       fuelBurnLitresPerHour: formData.fuelBurnLitresPerHour,
       departureMarina: formData.departureMarina,
-      cancellationPolicy: formData.cancellationPolicy,
-      responseTime: formData.responseTime,
+      cancellationPolicy: String(formData.cancellationPolicy),
+      responseTime: boat?.responseTime ?? "",
       mapQuery: formData.mapQuery,
       unavailableDates,
       minNoticeHours: formData.minNoticeHours,
@@ -333,6 +348,7 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
       const isMfaPolicyError =
         normalized.includes("boats_mfa_insert_guard") ||
         normalized.includes("boats_mfa_update_guard") ||
+        normalized.includes("has_mfa_session_or_service_role") ||
         (normalized.includes("row-level security") && normalized.includes("mfa"));
 
       toast({
@@ -362,7 +378,7 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
         <CardContent className="pt-6">
           <form onSubmit={handleSubmit} className="space-y-6" autoComplete="off" autoCorrect="off" spellCheck={false}>
             <div className="grid grid-cols-4 gap-2">
-              {FORM_STEPS.map((step, index) => (
+              {formSteps.map((step, index) => (
                 <div key={step} className="space-y-1">
                   <div className={`h-1 rounded-full ${index + 1 <= currentStep ? "bg-aegean" : "bg-muted"}`} />
                   <p className={`text-xs ${index + 1 === currentStep ? "text-foreground" : "text-muted-foreground"}`}>
@@ -434,19 +450,19 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="lengthMeters">Length (meters)</Label>
-                  <Input id="lengthMeters" type="number" min="1" step="0.1" value={formData.lengthMeters} onChange={(e) => setFormData({ ...formData, lengthMeters: Number(e.target.value) || 1 })} required />
+                  <Input id="lengthMeters" type="number" min="1" step="0.1" value={formData.lengthMeters} onChange={(e) => setFormData({ ...formData, lengthMeters: Number(e.target.value) || 1 })} disabled={isEdit} required />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="year">Year</Label>
-                  <Input id="year" type="number" min="1950" max="2100" value={formData.year} onChange={(e) => setFormData({ ...formData, year: Number(e.target.value) || new Date().getFullYear() })} required />
+                  <Input id="year" type="number" min="1950" max="2100" value={formData.year} onChange={(e) => setFormData({ ...formData, year: Number(e.target.value) || new Date().getFullYear() })} disabled={isEdit} required />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="cruisingSpeedKnots">Cruising Speed (knots)</Label>
-                  <Input id="cruisingSpeedKnots" type="number" min="1" value={formData.cruisingSpeedKnots} onChange={(e) => setFormData({ ...formData, cruisingSpeedKnots: Number(e.target.value) || 1 })} required />
+                  <Input id="cruisingSpeedKnots" type="number" min="1" value={formData.cruisingSpeedKnots} onChange={(e) => setFormData({ ...formData, cruisingSpeedKnots: Number(e.target.value) || 1 })} disabled={isEdit} required />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="fuelBurn">Fuel Burn (litres/hour)</Label>
-                  <Input id="fuelBurn" type="number" min="0" value={formData.fuelBurnLitresPerHour} onChange={(e) => setFormData({ ...formData, fuelBurnLitresPerHour: Number(e.target.value) || 0 })} required />
+                  <Input id="fuelBurn" type="number" min="0" value={formData.fuelBurnLitresPerHour} onChange={(e) => setFormData({ ...formData, fuelBurnLitresPerHour: Number(e.target.value) || 0 })} disabled={isEdit} required />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="departureMarina">Departure Marina</Label>
@@ -458,11 +474,7 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
                 </div>
                 <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="cancellationPolicy">Cancellation Policy</Label>
-                  <Input id="cancellationPolicy" value={formData.cancellationPolicy} onChange={(e) => setFormData({ ...formData, cancellationPolicy: e.target.value })} required />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="responseTime">Response Time</Label>
-                  <Input id="responseTime" value={formData.responseTime} onChange={(e) => setFormData({ ...formData, responseTime: e.target.value })} required />
+                  <Input id="cancellationPolicy" type="number" min="0" value={formData.cancellationPolicy} onChange={(e) => setFormData({ ...formData, cancellationPolicy: Number(e.target.value) || 0 })} required />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="minNoticeHours">Minimum Notice (hours)</Label>
@@ -567,7 +579,7 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
               </div>
             )}
 
-            {currentStep === 4 && (
+            {!isEdit && currentStep === 4 && (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">
                   <FileText className="h-4 w-4 text-aegean" />
@@ -617,12 +629,17 @@ const AddBoatModal = ({ onClose, boat }: AddBoatModalProps) => {
             )}
 
             <div className="flex gap-3 pt-2">
-              <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+              <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>Cancel</Button>
               {currentStep > 1 && (
-                <Button type="button" variant="outline" onClick={handlePrevStep}>Back</Button>
+                <Button type="button" variant="outline" onClick={handlePrevStep} disabled={isSubmitting}>Back</Button>
               )}
-              {currentStep < FORM_STEPS.length ? (
-                <Button type="button" className="ml-auto bg-gradient-accent text-accent-foreground" onClick={handleNextStep} disabled={!validateStep(currentStep)}>
+              {currentStep < formSteps.length ? (
+                <Button
+                  type="button"
+                  className="ml-auto bg-gradient-accent text-accent-foreground"
+                  onClick={handleNextStep}
+                  disabled={isSubmitting || !validateStep(currentStep)}
+                >
                   Next Step
                 </Button>
               ) : (

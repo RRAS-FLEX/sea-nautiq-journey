@@ -420,12 +420,14 @@ const Boats = () => {
                 {filteredBoats.map((boat, index) => (
                   <div key={boat.name} className="space-y-2">
                     <BoatCard {...boat} index={index} reviewCount={reviewCounts[boat.id] ?? 0} />
-                    <Link
-                      to={`/owners/${toOwnerSlug(boat.owner.name)}`}
-                      className="text-xs text-aegean hover:text-turquoise font-medium"
-                    >
-                      View {boat.owner.name}'s fleet →
-                    </Link>
+                    {boat.owner.name && (
+                      <Link
+                        to={`/owners/${toOwnerSlug(boat.owner.name)}`}
+                        className="text-xs text-aegean hover:text-turquoise font-medium"
+                      >
+                        View {boat.owner.name}'s fleet →
+                      </Link>
+                    )}
                   </div>
                 ))}
               </div>

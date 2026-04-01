@@ -8,6 +8,9 @@ interface SEOOptions {
   ogType?: string;
   keywords?: string;
   noIndex?: boolean;
+  locale?: string;
+  twitterCard?: "summary" | "summary_large_image";
+  hashtags?: string[];
 }
 
 const BASE_TITLE = "Nautiplex";
@@ -42,6 +45,9 @@ export const useSEO = ({
   ogType = "website",
   keywords,
   noIndex = false,
+  locale = "en_US",
+  twitterCard = "summary_large_image",
+  hashtags,
 }: SEOOptions) => {
   useEffect(() => {
     const fullTitle = title.includes(BASE_TITLE) ? title : `${title} | ${BASE_TITLE}`;
@@ -52,15 +58,32 @@ export const useSEO = ({
 
     if (keywords) setMeta("keywords", keywords);
 
-    // Open Graph
+    // Locale / site identifiers
+    if (locale) {
+      setMeta("og:locale", locale, true);
+    }
+    setMeta("og:site_name", BASE_TITLE, true);
+
+    const hashtagString = Array.isArray(hashtags)
+      ? hashtags
+          .map((tag) => tag.trim())
+          .filter(Boolean)
+          .map((tag) => (tag.startsWith("#") ? tag : `#${tag.replace(/\s+/g, "")}`))
+          .join(" ")
+      : "";
+
+    const ogDescription = hashtagString ? `${description} ${hashtagString}` : description;
+
+    // Open Graph (used by many social platforms when sharing links)
     setMeta("og:title", fullTitle, true);
-    setMeta("og:description", description, true);
+    setMeta("og:description", ogDescription, true);
     setMeta("og:type", ogType, true);
     setMeta("og:image", ogImage, true);
 
     // Twitter
+    setMeta("twitter:card", twitterCard);
     setMeta("twitter:title", fullTitle);
-    setMeta("twitter:description", description);
+    setMeta("twitter:description", hashtagString ? `${description} ${hashtagString}` : description);
     setMeta("twitter:image", ogImage);
 
     if (canonical) setCanonical(canonical);
@@ -69,5 +92,5 @@ export const useSEO = ({
       // Reset to home defaults on unmount
       document.title = "Nautiplex — Boat Rentals & Sea Experiences in Greece";
     };
-  }, [title, description, canonical, ogImage, ogType, keywords, noIndex]);
+  }, [title, description, canonical, ogImage, ogType, keywords, noIndex, locale, twitterCard, hashtags]);
 };

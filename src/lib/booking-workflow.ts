@@ -191,29 +191,32 @@ const isInsideOperatingWindow = (startTime: string, endTime: string) => {
 };
 
 const loadDayBookedSlots = async (boatId: string, date: string): Promise<DayBookingSlot[]> => {
-  const { data, error } = await (supabase as any)
+  // Confirmed bookings for this day
+  const { data: bookingRows, error: bookingsError } = await (supabase as any)
     .from("bookings")
     .select("departure_time, end_time, package_hours, status")
     .eq("boat_id", boatId)
     .eq("start_date", date)
-    .neq("status", "cancelled");
+    .eq("status", "confirmed");
 
-  if (error || !Array.isArray(data)) {
-    return [];
-  }
+  const slotsFromBookings: DayBookingSlot[] =
+    !bookingsError && Array.isArray(bookingRows)
+      ? bookingRows
+          .map((row: any) => {
+            const departureTime = String(row.departure_time ?? "");
+            const fallbackEnd = addHoursWithoutOvernightWrap(departureTime, Number(row.package_hours ?? 0));
+            const endTime = String(row.end_time ?? fallbackEnd ?? "");
+            if (!isValidTime(departureTime) || !isValidTime(endTime)) {
+              return null;
+            }
 
-  return data
-    .map((row: any) => {
-      const departureTime = String(row.departure_time ?? "");
-      const fallbackEnd = addHoursWithoutOvernightWrap(departureTime, Number(row.package_hours ?? 0));
-      const endTime = String(row.end_time ?? fallbackEnd ?? "");
-      if (!isValidTime(departureTime) || !isValidTime(endTime)) {
-        return null;
-      }
+            return { departureTime, endTime } satisfies DayBookingSlot;
+          })
+          .filter((slot: DayBookingSlot | null): slot is DayBookingSlot => Boolean(slot))
+      : [];
 
-      return { departureTime, endTime } satisfies DayBookingSlot;
-    })
-    .filter((slot: DayBookingSlot | null): slot is DayBookingSlot => Boolean(slot));
+  // Temporarily ignore calendar_events; availability is driven solely by confirmed bookings.
+  return slotsFromBookings;
 };
 
 const isSlotAvailable = (bookedSlots: DayBookingSlot[], departureTime: string, packageHours: number) => {
@@ -277,7 +280,7 @@ const shouldCancelNewlyCreatedOverlap = async (
     .select("id, departure_time, end_time, package_hours, created_at, status")
     .eq("boat_id", boatId)
     .eq("start_date", date)
-    .neq("status", "cancelled")
+    .eq("status", "confirmed")
     .order("created_at", { ascending: true });
 
   if (error || !Array.isArray(data)) {
@@ -486,15 +489,7 @@ export const confirmBookingWorkflow = async (input: ConfirmBookingInput): Promis
     throw new Error("This slot was just booked by another customer. Please choose another available time.");
   }
 
-  await (supabase as any)
-    .from("calendar_events")
-    .insert({
-      boat_id: bookingRow.boat_id,
-      date: bookingRow.start_date,
-      type: "booked",
-      guest_name: bookingRow.customer_name ?? input.customerName,
-      booking_id: bookingRow.id,
-    });
+  // Do not write to calendar_events for now; bookings table remains the single source of truth.
 
   const booking: BookingRecord = {
     id: bookingRow.id,

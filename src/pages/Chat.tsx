@@ -196,6 +196,12 @@ const Chat = () => {
           return;
         }
 
+        if (sessionUser.isOwner) {
+          setThread(null);
+          setErrorMessage(tl("You cannot start chat for your own boat.", "Δεν μπορείς να ξεκινήσεις συνομιλία για το δικό σου σκάφος."));
+          return;
+        }
+
         const customerThread = await getOrCreateThread(boat.id, boat.name, ownerName);
         setThread(customerThread);
       } catch (error) {

@@ -23,6 +23,15 @@ export interface OwnerSalesHistoryItem {
   totalPrice: number;
 }
 
+export interface CancelBookingResult {
+  bookingId: string;
+  status: string;
+  alreadyCancelled: boolean;
+  refundAmount: number;
+  refundRatePercent: number;
+  refundStatus: string;
+}
+
 export const getCustomerBookingHistory = async (): Promise<CustomerHistoryItem[]> => {
   const {
     data: { session },
@@ -123,4 +132,59 @@ export const getOwnerSalesHistory = async (): Promise<OwnerSalesHistoryItem[]> =
         totalPrice: Number(booking.total_price ?? 0),
       }))
     : [];
+};
+
+export const cancelCustomerBooking = async (input: {
+  bookingId: string;
+  reason?: string;
+}): Promise<CancelBookingResult> => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.user) {
+    throw new Error("You must be signed in to cancel a booking.");
+  }
+
+  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
+  const cancelEndpoint = apiBaseUrl
+    ? `${apiBaseUrl.replace(/\/$/, "")}/api/bookings/cancel`
+    : "/api/bookings/cancel";
+
+  const response = await fetch(cancelEndpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({
+      bookingId: input.bookingId,
+      customerId: session.user.id,
+      customerEmail: session.user.email ?? undefined,
+      reason: input.reason,
+    }),
+  });
+
+  const raw = await response.text();
+  let payload: Partial<CancelBookingResult> & { error?: string } = {};
+  if (raw) {
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      throw new Error("Cancellation API returned a non-JSON response.");
+    }
+  }
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Failed to cancel booking");
+  }
+
+  return {
+    bookingId: String(payload.bookingId ?? input.bookingId),
+    status: String(payload.status ?? "cancelled"),
+    alreadyCancelled: Boolean(payload.alreadyCancelled),
+    refundAmount: Number(payload.refundAmount ?? 0),
+    refundRatePercent: Number(payload.refundRatePercent ?? 0),
+    refundStatus: String(payload.refundStatus ?? "none"),
+  };
 };
