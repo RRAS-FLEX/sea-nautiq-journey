@@ -19,7 +19,6 @@ const formatSearchDateTime = (dateTime: string) => {
 
   return new Intl.DateTimeFormat("en-GB", {
     dateStyle: "medium",
-    timeStyle: "short",
   }).format(parsed);
 };
 
@@ -53,15 +52,22 @@ const FeaturedBoats = ({ searchCriteria }: FeaturedBoatsProps) => {
 
   const normalizedLocationFilter = searchCriteria?.location.trim().toLowerCase() ?? "";
   const requiredPassengers = searchCriteria?.passengers ?? 0;
+  const hasDateFilter = Boolean(searchCriteria?.dateTime);
+  const normalizedDateKey = hasDateFilter ? searchCriteria!.dateTime.slice(0, 10) : "";
 
   const filteredBoats = searchCriteria
-    ? allBoats.filter(
-        (boat) =>
-          boat.location.toLowerCase().includes(normalizedLocationFilter) &&
-          boat.capacity >= requiredPassengers,
-      )
+    ? allBoats.filter((boat) => {
+        const matchesLocation = boat.location.toLowerCase().includes(normalizedLocationFilter);
+        const matchesPassengers = boat.capacity >= requiredPassengers;
+        const matchesDate = !hasDateFilter
+          ? true
+          : !boat.availability.unavailableDates.some((date) => date.slice(0, 10) === normalizedDateKey);
+
+        return matchesLocation && matchesPassengers && matchesDate;
+      })
     : allBoats;
   const promotedBoats = sortBoatsByBookingsFirst(filteredBoats);
+  const visibleBoats = promotedBoats.slice(0, 5);
   const promotedBoatIdsKey = promotedBoats.map((boat) => boat.id).join("|");
 
   useEffect(() => {
@@ -133,9 +139,9 @@ const FeaturedBoats = ({ searchCriteria }: FeaturedBoatsProps) => {
           </div>
         ) : filteredBoats.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {promotedBoats.map((boat, i) => (
+            {visibleBoats.map((boat, i) => (
               <BoatCard
-                key={boat.name}
+                key={boat.id}
                 {...boat}
                 index={i}
                 reviewCount={reviewCounts[boat.id] ?? 0}

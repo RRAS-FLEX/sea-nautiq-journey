@@ -76,7 +76,7 @@ export const getOwnerBoats = async (): Promise<OwnerBoat[]> => {
         capacity: boat.capacity,
         pricePerDay: boat.price_per_day,
         rating: boat.rating ?? 0,
-        image: resolveStorageImage(boat.image, "boat-images", "https://via.placeholder.com/400x300?text=Boat"),
+        image: resolveStorageImage(boat.image, "boat-images", "/placeholder.svg"),
         features: features?.map((f) => f.feature) ?? [],
         documents:
           documents?.map((d) => ({

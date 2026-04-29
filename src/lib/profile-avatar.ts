@@ -14,16 +14,20 @@ const toReadableStorageError = (error: any, fallback: string) => {
   return message || fallback;
 };
 
-const getAvatarObjectPath = (userId: string) => `${userId}/${AVATAR_OBJECT_NAME}`;
+const getAvatarObjectPath = (userId: string | null | undefined) => {
+  const normalized = String(userId ?? "").trim();
+  return `${normalized}/${AVATAR_OBJECT_NAME}`;
+};
 
-export const getUserAvatarUrl = async (userId: string): Promise<string | null> => {
-  if (!userId?.trim()) {
+export const getUserAvatarUrl = async (userId: string | null | undefined): Promise<string | null> => {
+  const normalized = String(userId ?? "").trim();
+  if (!normalized) {
     return null;
   }
 
   const { data, error } = await supabase.storage
     .from(AVATAR_BUCKET)
-    .createSignedUrl(getAvatarObjectPath(userId), 60 * 60 * 24 * 7);
+    .createSignedUrl(getAvatarObjectPath(normalized), 60 * 60 * 24 * 7);
 
   if (error || !data?.signedUrl) {
     const message = String(error?.message ?? "").toLowerCase();
@@ -36,8 +40,9 @@ export const getUserAvatarUrl = async (userId: string): Promise<string | null> =
   return data.signedUrl;
 };
 
-export const uploadUserAvatar = async (userId: string, file: File): Promise<string> => {
-  if (!userId?.trim()) {
+export const uploadUserAvatar = async (userId: string | null | undefined, file: File): Promise<string> => {
+  const normalized = String(userId ?? "").trim();
+  if (!normalized) {
     throw new Error("Missing user account context for avatar upload.");
   }
 
@@ -47,7 +52,7 @@ export const uploadUserAvatar = async (userId: string, file: File): Promise<stri
 
   const { error } = await supabase.storage
     .from(AVATAR_BUCKET)
-    .upload(getAvatarObjectPath(userId), file, {
+    .upload(getAvatarObjectPath(normalized), file, {
       upsert: true,
       contentType: file.type || "image/jpeg",
     });

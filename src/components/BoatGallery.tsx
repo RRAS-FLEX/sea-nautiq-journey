@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { supabase } from "@/lib/supabase";
+import { BoatsGridSkeleton } from "@/components/loading/LoadingUI";
 
 type BoatRecord = {
   id: string;
@@ -155,9 +156,7 @@ export default function BoatGallery() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[240px] items-center justify-center">
-        <div className="text-sm font-medium text-muted-foreground">Loading boats...</div>
-      </div>
+      <BoatsGridSkeleton count={3} />
     );
   }
 

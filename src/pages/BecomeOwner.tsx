@@ -65,15 +65,14 @@ const BecomeOwner = () => {
   const [form, setForm] = useState(defaultForm);
   const [ownerStep, setOwnerStep] = useState<1 | 2 | 3 | 4>(1);
   const [applicationStatus, setApplicationStatus] = useState<string | null>(null);
+    const [hasLoadedApplication, setHasLoadedApplication] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const canContinueStep1 = Boolean(form.phone.trim());
   const canContinueStep2 = Boolean(form.operatingArea.trim() && form.yearsExperience.trim());
   const canContinueStep3 = Boolean(
     form.boatCount.trim() &&
-    form.operatingSeason &&
-    form.bankAccountHolder.trim() &&
-    form.iban.trim(),
+    form.operatingSeason ,
   );
 
   const set = (key: keyof typeof defaultForm) => (value: string) =>
@@ -97,6 +96,10 @@ const BecomeOwner = () => {
         if (!cancelled) setApplicationStatus(application?.status ?? null);
       } catch {
         // ignore
+      } finally {
+        if (!cancelled) {
+          setHasLoadedApplication(true);
+        }
       }
     };
     load();
@@ -109,9 +112,7 @@ const BecomeOwner = () => {
       !form.operatingArea.trim() ||
       !form.yearsExperience.trim() ||
       !form.boatCount.trim() ||
-      !form.operatingSeason ||
-      !form.bankAccountHolder.trim() ||
-      !form.iban.trim()
+      !form.operatingSeason 
     ) {
       toast({
         title: "Missing required fields",
@@ -231,6 +232,36 @@ const BecomeOwner = () => {
                   <Button asChild className="bg-gradient-accent text-accent-foreground">
                     <Link to="/owner-dashboard">Open owner dashboard</Link>
                   </Button>
+                </CardContent>
+              </Card>
+            ) : hasLoadedApplication && applicationStatus === "pending" ? (
+              <Card className="shadow-card">
+                <CardHeader>
+                  <CardTitle>Application pending review</CardTitle>
+                  <CardDescription>
+                    We have already received your owner application. Our team is reviewing it now.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className={`flex items-start gap-3 rounded-xl border p-4 ${statusConfig.pending.color}`}>
+                    {statusConfig.pending.icon}
+                    <div>
+                      <p className="font-semibold">{statusConfig.pending.label}</p>
+                      <p className="text-sm mt-0.5">{statusConfig.pending.description}</p>
+                    </div>
+                  </div>
+                  <Button asChild variant="outline" className="w-full">
+                    <Link to="/">Back to home</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : !hasLoadedApplication ? (
+              <Card className="shadow-card">
+                <CardContent className="pt-6 space-y-2">
+                  <p className="font-semibold text-foreground">Checking your application status…</p>
+                  <p className="text-sm text-muted-foreground">
+                    Please wait a moment while we verify if you already submitted an owner application.
+                  </p>
                 </CardContent>
               </Card>
             ) : (
@@ -455,60 +486,7 @@ const BecomeOwner = () => {
                   </CardContent>
                 </Card>
 
-                <Card className="shadow-card-hover">
-                  <CardHeader>
-                    <CardTitle>Payout details</CardTitle>
-                    <CardDescription>
-                      Required so Stripe payouts can be configured for your owner account.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="bank-account-holder">
-                          Bank account holder <span className="text-destructive">*</span>
-                        </Label>
-                        <Input
-                          id="bank-account-holder"
-                          placeholder="Full legal name"
-                          value={form.bankAccountHolder}
-                          onChange={(e) => set("bankAccountHolder")(e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="iban">
-                          IBAN <span className="text-destructive">*</span>
-                        </Label>
-                        <Input
-                          id="iban"
-                          placeholder="GR16 0110 1250 0000 0001 2300 695"
-                          value={form.iban}
-                          onChange={(e) => set("iban")(e.target.value)}
-                        />
-                      </div>
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label htmlFor="bank-name">Bank name (optional)</Label>
-                        <Input
-                          id="bank-name"
-                          placeholder="Alpha Bank"
-                          value={form.bankName}
-                          onChange={(e) => set("bankName")(e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="stripe-account-id">Stripe account ID (optional)</Label>
-                        <Input
-                          id="stripe-account-id"
-                          placeholder="acct_1234..."
-                          value={form.stripeAccountId}
-                          onChange={(e) => set("stripeAccountId")(e.target.value)}
-                        />
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                {/* Payout details removed; owners will configure payouts later in Stripe Connect flow. */}
 
                 {/* Section 4 — Online presence (optional) */}
                 <Card className="shadow-card-hover">

@@ -47,7 +47,6 @@ const BookingClosed = () => {
                 <ul className="text-sm text-muted-foreground list-disc pl-5 space-y-1">
                   <li>Try another date to find open slots quickly.</li>
                   <li>Switch package length for more available start times.</li>
-                  <li>Chat with the owner for custom availability.</li>
                 </ul>
               </div>
 
@@ -59,12 +58,6 @@ const BookingClosed = () => {
                 </Button>
                 <Button asChild variant="outline">
                   <Link to="/boats">Browse other boats</Link>
-                </Button>
-                <Button asChild variant="outline" className="sm:col-span-2">
-                  <Link to={`/chat?boat=${encodeURIComponent(boat)}`}>
-                    <MessageCircle className="h-4 w-4 mr-2" />
-                    Chat with owner
-                  </Link>
                 </Button>
               </div>
             </CardContent>

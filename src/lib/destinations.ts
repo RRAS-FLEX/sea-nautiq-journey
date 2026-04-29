@@ -169,8 +169,9 @@ export const getDestinations = async (): Promise<Destination[]> => {
       if (destinationsInMemory?.destinations?.length) {
         return destinationsInMemory.destinations;
       }
-
-      return fallbackDestinations;
+      // If Supabase has no destinations and there's no warm cache, return an empty list
+      // instead of hard-coded fallback data.
+      return [];
     } finally {
       destinationsInFlight = null;
     }
@@ -178,5 +179,3 @@ export const getDestinations = async (): Promise<Destination[]> => {
 
   return destinationsInFlight;
 };
-
-export { fallbackDestinations as destinations };

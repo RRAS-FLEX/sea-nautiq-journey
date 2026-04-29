@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSEO } from "@/hooks/useSEO";
 import { Link, useSearchParams } from "react-router-dom";
-import { Anchor, Filter, LayoutGrid, MapPin, Rows3, Sparkles, Users } from "lucide-react";
+import { Anchor, Filter, LayoutGrid, MapPin, Rows3, Sparkles, Users, Search } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import BoatCard from "@/components/BoatCard";
@@ -57,6 +57,7 @@ const Boats = () => {
   const [boatsError, setBoatsError] = useState("");
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"grid" | "list">("list");
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   useEffect(() => {
     const locationFromQuery = searchParams.get("location") ?? "";
@@ -88,7 +89,8 @@ const Boats = () => {
 
     const visibleBoats = allBoats.filter((boat) => {
       const matchesLocation = normalizedLocation
-        ? boat.location.toLowerCase().includes(normalizedLocation)
+        ? boat.location.toLowerCase().includes(normalizedLocation) ||
+          boat.name.toLowerCase().includes(normalizedLocation)
         : true;
 
       const ownerSlug = toOwnerSlug(boat.owner.name).toLowerCase();
@@ -228,6 +230,33 @@ const Boats = () => {
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <div className="flex flex-col sm:flex-row w-full sm:w-auto gap-2 sm:items-center">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="gap-2 w-full sm:w-auto justify-center sm:justify-start"
+                    onClick={() => setIsSearchOpen((open) => !open)}
+                 >
+                    <Search className="h-4 w-4 text-aegean" />
+                    <span className="text-xs sm:text-sm">
+                      {tl("Search", "Αναζήτηση")}
+                    </span>
+                  </Button>
+                  {isSearchOpen && (
+                    <div className="w-full sm:flex-1 sm:max-w-xs">
+                      <div className="relative">
+                        <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                        <Input
+                          value={locationQuery}
+                          onChange={(event) => setLocationQuery(event.target.value)}
+                          placeholder={tl("Search by island or marina", "Αναζήτηση ανά νησί ή μαρίνα")}
+                          className="pl-9 text-sm w-full"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <Dialog open={isFiltersOpen} onOpenChange={setIsFiltersOpen}>
                   <DialogTrigger asChild>
                     <Button variant="outline" className="gap-2 w-full sm:w-auto">
@@ -288,10 +317,10 @@ const Boats = () => {
                           <SelectTrigger><SelectValue placeholder="Any price" /></SelectTrigger>
                           <SelectContent>
                             <SelectItem value="any">Any price</SelectItem>
-                            <SelectItem value="500">Up to €500/day</SelectItem>
-                            <SelectItem value="1000">Up to €1,000/day</SelectItem>
-                            <SelectItem value="1500">Up to €1,500/day</SelectItem>
-                            <SelectItem value="2000">Up to €2,000+/day</SelectItem>
+                            <SelectItem value="500">Up to €500</SelectItem>
+                            <SelectItem value="1000">Up to €1,000</SelectItem>
+                            <SelectItem value="1500">Up to €1,500</SelectItem>
+                            <SelectItem value="2000">Up to €2,000+</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -317,6 +346,11 @@ const Boats = () => {
                             <SelectItem value="Speed Boat">Speed Boat</SelectItem>
                             <SelectItem value="Catamaran">Catamaran</SelectItem>
                             <SelectItem value="Luxury Yacht">Luxury Yacht</SelectItem>
+                            <SelectItem value="Sailboat">Sailboat</SelectItem>
+                            <SelectItem value="Jet Ski">Jet Ski</SelectItem>
+                            <SelectItem value="Paddleboard">Paddleboard</SelectItem>
+                            <SelectItem value="Party Boat">Party Boat</SelectItem>
+                            <SelectItem value="Watersports Charter">Watersports Charter</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -440,8 +474,17 @@ const Boats = () => {
               </Card>
             )}
 
-            <div className="text-center pt-2">
-              <Link to="/owner-profile" className="text-aegean hover:text-turquoise transition-colors font-medium">
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+              <Link
+                to="/owner-dashboard"
+                className="inline-flex items-center justify-center rounded-full bg-aegean px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-turquoise transition-colors"
+              >
+                {tl("Owner dashboard", "Πίνακας ελέγχου ιδιοκτήτη")}
+              </Link>
+              <Link
+                to="/owner-profile"
+                className="text-xs sm:text-sm text-aegean hover:text-turquoise transition-colors font-medium"
+              >
                 {tl("Are you a boat owner? View owner profile →", "Είσαι ιδιοκτήτης σκάφους; Δες το προφίλ ιδιοκτήτη →")}
               </Link>
             </div>

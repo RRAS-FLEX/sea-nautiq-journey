@@ -6,6 +6,7 @@ import Footer from "@/components/Footer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { BookingConfirmationSkeleton } from "@/components/loading/LoadingUI";
 
 type ResolvedBooking = {
   bookingId: string;
@@ -15,14 +16,15 @@ type ResolvedBooking = {
   amount: number;
   ownerNotified: boolean;
   emailQueued: boolean;
+  partyTicketCode?: string;
+  partyTicketCount?: number;
+  partyTicketStatus?: string;
+  partyTicketPrice?: number;
+  partyTicketQuantity?: number;
 };
 
 const BookingConfirmed = () => {
   const [searchParams] = useSearchParams();
-
-  const [resolvedBooking, setResolvedBooking] = useState<ResolvedBooking | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const bookingId = searchParams.get("bookingId") ?? "";
   const boat = searchParams.get("boat") ?? "Boat";
@@ -31,7 +33,16 @@ const BookingConfirmed = () => {
   const amount = searchParams.get("amount") ?? "";
   const emailQueued = searchParams.get("emailQueued") === "true";
   const ownerNotified = searchParams.get("ownerNotified") === "true";
+  const partyTicketCode = searchParams.get("partyTicketCode") ?? "";
+  const partyTicketCount = Number(searchParams.get("partyTicketCount") ?? 0);
+  const partyTicketStatus = searchParams.get("partyTicketStatus") ?? "";
+  const partyTicketPrice = Number(searchParams.get("partyTicketPrice") ?? 0);
+  const partyTicketQuantity = Number(searchParams.get("partyTicketQuantity") ?? 0);
   const stripeSessionId = searchParams.get("session_id") ?? searchParams.get("sessionId") ?? "";
+
+  const [resolvedBooking, setResolvedBooking] = useState<ResolvedBooking | null>(null);
+  const [isLoading, setIsLoading] = useState(Boolean(stripeSessionId));
+  const [error, setError] = useState<string | null>(null);
 
   const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? "").trim();
   const bookingLookupEndpoint = apiBaseUrl
@@ -86,6 +97,12 @@ const BookingConfirmed = () => {
       : amount;
   const effectiveOwnerNotified = resolvedBooking?.ownerNotified ?? ownerNotified;
   const effectiveEmailQueued = resolvedBooking?.emailQueued ?? emailQueued;
+  const effectivePartyTicketCode = resolvedBooking?.partyTicketCode || partyTicketCode;
+  const effectivePartyTicketCount = Number(resolvedBooking?.partyTicketCount ?? partyTicketCount);
+  const effectivePartyTicketStatus = resolvedBooking?.partyTicketStatus || partyTicketStatus;
+  const effectivePartyTicketPrice = Number(resolvedBooking?.partyTicketPrice ?? partyTicketPrice);
+  const effectivePartyTicketQuantity = Number(resolvedBooking?.partyTicketQuantity ?? partyTicketQuantity);
+  const hasPartyTicket = Boolean(effectivePartyTicketCode && effectivePartyTicketStatus === "issued");
 
   return (
     <div className="min-h-screen bg-background">
@@ -108,9 +125,7 @@ const BookingConfirmed = () => {
                 Your trip is secured. We lock this slot immediately to avoid overlaps and keep your booking reliable.
               </p>
 
-              {isLoading ? (
-                <p className="text-xs text-muted-foreground">Loading payment confirmation details…</p>
-              ) : null}
+              {isLoading ? <BookingConfirmationSkeleton /> : null}
               {error ? (
                 <p className="text-xs text-destructive">{error}</p>
               ) : null}
@@ -136,6 +151,27 @@ const BookingConfirmed = () => {
                   </p>
                 </div>
               </div>
+
+              {hasPartyTicket ? (
+                <div className="rounded-2xl border border-amber-400/40 bg-amber-50 p-4 text-sm text-foreground space-y-2">
+                  <p className="font-medium">Party tickets issued</p>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">Unit price</span>
+                    <span className="font-medium">{effectivePartyTicketPrice > 0 ? `€${effectivePartyTicketPrice.toFixed(effectivePartyTicketPrice % 1 === 0 ? 0 : 2)}` : "Included"}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">Tickets</span>
+                    <span className="font-medium">{Math.max(1, effectivePartyTicketQuantity || effectivePartyTicketCount)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-muted-foreground">Ticket code</span>
+                    <span className="font-semibold tracking-wide">{effectivePartyTicketCode}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Show this code at check-in for your party boarding list.
+                  </p>
+                </div>
+              ) : null}
 
               <div className="rounded-2xl border border-aegean/30 bg-aegean/5 p-4 text-sm text-foreground flex items-start gap-2">
                 <ShieldCheck className="h-4 w-4 text-aegean mt-0.5 shrink-0" />

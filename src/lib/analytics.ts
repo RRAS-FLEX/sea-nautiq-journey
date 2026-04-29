@@ -4,7 +4,8 @@ type AnalyticsEventName =
   | "boat_viewed"
   | "booking_started"
   | "booking_confirmed"
-  | "experiment_exposure";
+  | "experiment_exposure"
+  | "oil_price_updated";
 
 type AnalyticsPayload = Record<string, string | number | boolean | null | undefined>;
 
@@ -134,6 +135,13 @@ const toGa4Payload = (event: AnalyticsEvent): AnalyticsPayload => {
     return {
       page_title: event.payload.pageTitle as string,
       page_path: event.payload.path as string,
+    };
+  }
+
+  if (event.name === "oil_price_updated") {
+    return {
+      oil_price_per_liter: event.payload.oilPricePerLiter as number,
+      source: event.payload.source as string,
     };
   }
 

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useSEO } from "@/hooks/useSEO";
 import { useStructuredData } from "@/hooks/useStructuredData";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { format, isSameDay, parseISO } from "date-fns";
 import { Check, Flag, Gauge, MapPin, MessageCircle, Navigation, ShieldCheck, Star, Users } from "lucide-react";
 import Navbar from "@/components/Navbar";
@@ -13,16 +13,20 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import BoatLocationMap from "@/components/BoatLocationMap";
-import { buildBoatPublicSlug, getBoatByPublicReference } from "@/lib/boats";
+import { buildBoatPublicSlug, getBoatByPublicReference, getBoatByIdForOwner } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
+import { getOwnerBadgesForBoat, type OwnerBadge } from "@/lib/owner-badges";
 import { getBoatReviews, getBoatReviewStats, type BoatReview } from "@/lib/reviews";
 import { trackBoatViewed, trackBookingStarted } from "@/lib/analytics";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { withRetry } from "@/lib/retry";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 const BoatDetails = () => {
   const { tl } = useLanguage();
   const { boatRef } = useParams<{ boatRef: string }>();
+  const [searchParams] = useSearchParams();
+  const { user } = useCurrentUser();
   const [boat, setBoat] = useState<Boat | null>(null);
   const [isBoatLoading, setIsBoatLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -49,7 +53,23 @@ const BoatDetails = () => {
       }
 
       try {
-        const foundBoat = await withRetry(() => getBoatByPublicReference(boatRef), { retries: 2, initialDelayMs: 220 });
+        const isOwnerPreview = searchParams.get("owner-preview") === "1";
+        const looksLikeId = !!boatRef && boatRef.length === 36;
+
+        let foundBoat: Boat | null;
+
+        if (isOwnerPreview && looksLikeId && user?.isOwner) {
+          // Owner preview path: allow viewing own boat even if payouts are not ready.
+          foundBoat = await withRetry(() => getBoatByIdForOwner(boatRef), {
+            retries: 2,
+            initialDelayMs: 220,
+          });
+        } else {
+          foundBoat = await withRetry(() => getBoatByPublicReference(boatRef), {
+            retries: 2,
+            initialDelayMs: 220,
+          });
+        }
         if (!cancelled) {
           setBoat(foundBoat);
           setLoadError("");
@@ -83,26 +103,36 @@ const BoatDetails = () => {
   const [boatReviews, setBoatReviews] = useState<BoatReview[]>([]);
   const [reviewStats, setReviewStats] = useState({ total: 0, averageRating: 0 });
   const [selectedReview, setSelectedReview] = useState<BoatReview | null>(null);
+  const [ownerBadges, setOwnerBadges] = useState<OwnerBadge[]>([]);
+  const isOwnerPreview = searchParams.get("owner-preview") === "1" && Boolean(user?.isOwner);
   const publicBoatRef = boat ? boat.publicSlug || buildBoatPublicSlug(boat) : "";
   const publicBoatUrl = boat ? `https://nautiq.gr/boats/${publicBoatRef}` : undefined;
+  const resolvedTicketMaxPeople = boat ? (boat.ticketMaxPeople > 0 ? boat.ticketMaxPeople : boat.capacity) : 0;
+  const resolvedTicketPricePerPerson = boat
+    ? (boat.ticketPricePerPerson > 0 ? boat.ticketPricePerPerson : boat.partyReady && boat.capacity > 0 ? boat.pricePerDay / boat.capacity : 0)
+    : 0;
+  const formatTicketPrice = (value: number) => `€${value.toFixed(value % 1 === 0 ? 0 : 2)}`;
 
   useEffect(() => {
     if (!boat?.id) {
       setBoatReviews([]);
       setReviewStats({ total: 0, averageRating: 0 });
+      setOwnerBadges([]);
       return;
     }
 
-    const loadReviews = async () => {
-      const [nextReviews, nextStats] = await Promise.all([
+    const loadReviewsAndBadges = async () => {
+      const [nextReviews, nextStats, nextBadges] = await Promise.all([
         getBoatReviews(boat.id),
         getBoatReviewStats(boat.id),
+        getOwnerBadgesForBoat(boat.id),
       ]);
       setBoatReviews(nextReviews.slice(0, 4));
       setReviewStats(nextStats);
+      setOwnerBadges(nextBadges);
     };
 
-    loadReviews();
+    loadReviewsAndBadges();
   }, [boat?.id]);
   const boatStructuredData = boat
     ? {
@@ -251,7 +281,7 @@ const BoatDetails = () => {
       <Navbar />
 
       {/* Mobile Book Now Button */}
-      {showMobileBookingCta ? (
+      {showMobileBookingCta && !isOwnerPreview ? (
         <button
           onClick={scrollToBooking}
           className="fixed bottom-4 left-4 right-4 md:hidden z-[1200] py-3 px-4 bg-gradient-accent text-accent-foreground font-semibold rounded-xl shadow-lg hover:opacity-90 transition-opacity"
@@ -299,6 +329,8 @@ const BoatDetails = () => {
                   <Badge variant="outline" className="flex items-center gap-1"><Users className="h-3.5 w-3.5" />{boat.capacity} {tl("guests", "επισκέπτες")}</Badge>
                   <Badge variant="outline" className="flex items-center gap-1"><Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />{boat.rating}</Badge>
                   {boat.skipperRequired ? <Badge variant="outline">{tl("Skipper required", "Απαιτείται skipper")}</Badge> : null}
+                  {boat.partyReady ? <Badge variant="outline">Boat parties</Badge> : null}
+                  {/* Voucher feature removed */}
                 </div>
 
                 <div className="rounded-3xl border border-border bg-muted/20 p-5 space-y-4">
@@ -336,6 +368,42 @@ const BoatDetails = () => {
                   </div>
                 </div>
 
+                {boat.partyReady ? (
+                  <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5 space-y-3">
+                    <h2 className="font-heading font-semibold text-lg text-foreground">Boat party tickets</h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="rounded-2xl bg-background border border-amber-200 p-3">
+                        <p className="text-xs text-muted-foreground">Ticket price</p>
+                        <p className="font-semibold text-foreground">
+                          {resolvedTicketPricePerPerson > 0 ? formatTicketPrice(resolvedTicketPricePerPerson) : "Contact for price"}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl bg-background border border-amber-200 p-3">
+                        <p className="text-xs text-muted-foreground">Max people</p>
+                        <p className="font-semibold text-foreground">
+                          {resolvedTicketMaxPeople > 0 ? `${resolvedTicketMaxPeople} guests` : "Capacity on request"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                      <div className="rounded-2xl bg-background border border-amber-200 p-3">
+                        <p className="font-semibold text-foreground">1. Plan the event</p>
+                        <p className="text-muted-foreground">Choose guest count, music, drinks, and cruise length.</p>
+                      </div>
+                      <div className="rounded-2xl bg-background border border-amber-200 p-3">
+                        <p className="font-semibold text-foreground">2. Lock the boat</p>
+                        <p className="text-muted-foreground">Reserve your date and confirm the booking with the owner.</p>
+                      </div>
+                      <div className="rounded-2xl bg-background border border-amber-200 p-3">
+                        <p className="font-semibold text-foreground">3. Launch smoothly</p>
+                        <p className="text-muted-foreground">Confirm the marina, party rules, and departure timing with the owner.</p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Voucher offers removed */}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="rounded-2xl border border-border p-4">
                     <p className="text-sm text-muted-foreground">{tl("Departure marina", "Μαρίνα αναχώρησης")}</p>
@@ -371,6 +439,12 @@ const BoatDetails = () => {
                               {tl("Guest favorite", "Αγαπημένο των επισκεπτών")}
                             </Badge>
                           ) : null}
+                          {ownerBadges.map((badge) => (
+                            <Badge key={badge.id} variant="outline" className="flex items-center gap-1 text-xs">
+                              <ShieldCheck className="h-3.5 w-3.5" />
+                              {badge.name}
+                            </Badge>
+                          ))}
                         </div>
                         <p className="text-sm text-muted-foreground break-words">
                           {boat.owner.title || "Boat Owner"} · {tl("member since", "μέλος από")} {boat.owner.joinedYear}
@@ -378,7 +452,7 @@ const BoatDetails = () => {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
                       <div className="rounded-2xl border border-border bg-background p-3">
                         <p className="text-muted-foreground text-[11px]">{tl("Trips", "Ταξίδια")}</p>
                         <p className="font-semibold text-foreground">{boat.owner.tripsHosted}</p>
@@ -386,10 +460,6 @@ const BoatDetails = () => {
                       <div className="rounded-2xl border border-border bg-background p-3">
                         <p className="text-muted-foreground text-[11px]">{tl("Response", "Απάντηση")}</p>
                         <p className="font-semibold text-foreground">{boat.owner.responseRate}%</p>
-                      </div>
-                      <div className="rounded-2xl border border-border bg-background p-3">
-                        <p className="text-muted-foreground text-[11px]">{tl("Usually replies", "Συνήθως απαντά")}</p>
-                        <p className="font-semibold text-foreground truncate">{boat.responseTime}</p>
                       </div>
                       <div className="rounded-2xl border border-border bg-background p-3">
                         <p className="text-muted-foreground text-[11px]">{tl("Languages", "Γλώσσες")}</p>
@@ -417,11 +487,6 @@ const BoatDetails = () => {
                           </Link>
                         </Button>
                       )}
-                      <Button asChild variant="outline" className="w-full">
-                        <Link to={`/chat?boatRef=${encodeURIComponent(publicBoatRef)}&boat=${encodeURIComponent(boat.name)}`}>
-                          <MessageCircle className="mr-2 h-4 w-4" />{tl("Chat with owner", "Συνομιλία με ιδιοκτήτη")}
-                        </Link>
-                      </Button>
                     </div>
                   </div>
 
@@ -478,24 +543,29 @@ const BoatDetails = () => {
                 <CardContent className="space-y-4">
                   <div className="flex items-end justify-between">
                     <div>
-                      <p className="text-sm text-muted-foreground">{tl("Starting from", "Από")}</p>
-                      <p className="text-3xl font-heading font-bold text-foreground">€{boat.pricePerDay}</p>
+                      <p className="text-sm text-muted-foreground">{boat.partyReady ? tl("Ticket price", "Τιμή εισιτηρίου") : tl("Starting from", "Από")}</p>
+                      <p className="text-3xl font-heading font-bold text-foreground">
+                        {boat.partyReady
+                          ? `${resolvedTicketPricePerPerson > 0 ? `€${resolvedTicketPricePerPerson.toFixed(resolvedTicketPricePerPerson % 1 === 0 ? 0 : 2)}` : tl("Contact", "Επικοινωνία")}`
+                          : `€${boat.pricePerDay}`}
+                      </p>
                     </div>
-                    <p className="text-sm text-muted-foreground">{tl("per day", "ανά ημέρα")}</p>
+                    <p className="text-sm text-muted-foreground">{boat.partyReady ? tl("per ticket", "ανά εισιτήριο") : tl("per day", "ανά ημέρα")}</p>
                   </div>
-                  <Button asChild className="w-full bg-gradient-accent text-accent-foreground">
-                    <Link
-                      to={`/booking?boatRef=${encodeURIComponent(publicBoatRef)}&boat=${encodeURIComponent(boat.name)}`}
-                      onClick={() => trackBookingStarted({ boatId: boat.id, boatName: boat.name, source: "boat_details" })}
-                    >
-                      {tl("Request Booking", "Αίτημα Κράτησης")}
-                    </Link>
-                  </Button>
-                  <Button asChild variant="outline" className="w-full">
-                    <Link to={`/chat?boatRef=${encodeURIComponent(publicBoatRef)}&boat=${encodeURIComponent(boat.name)}`}>
-                      <MessageCircle className="mr-2 h-4 w-4" />{tl("Chat with owner", "Συνομιλία με ιδιοκτήτη")}
-                    </Link>
-                  </Button>
+                  {isOwnerPreview ? (
+                    <p className="text-xs text-muted-foreground">
+                      {tl("Booking is disabled in owner preview. Connect payouts and set the boat to active to allow guests to request trips.", "Η κράτηση είναι απενεργοποιημένη στην προεπισκόπηση ιδιοκτήτη. Σύνδεσε πληρωμές και όρισε το σκάφος ως ενεργό για να επιτρέψεις αιτήματα.")}
+                    </p>
+                  ) : (
+                    <Button asChild className="w-full bg-gradient-accent text-accent-foreground">
+                      <Link
+                        to={`/booking?boatRef=${encodeURIComponent(publicBoatRef)}&boat=${encodeURIComponent(boat.name)}`}
+                        onClick={() => trackBookingStarted({ boatId: boat.id, boatName: boat.name, source: "boat_details" })}
+                      >
+                        {tl("Request Booking", "Αίτημα Κράτησης")}
+                      </Link>
+                    </Button>
+                  )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <Button asChild variant="ghost" className="w-full justify-start text-muted-foreground hover:text-foreground">
                       <Link to={`/report?type=boat&target=${encodeURIComponent(boat.name)}&targetRef=${encodeURIComponent(publicBoatRef)}&subject=${encodeURIComponent(`Report boat: ${boat.name}`)}`}>

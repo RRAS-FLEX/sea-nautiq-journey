@@ -10,7 +10,6 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Navbar from "@/components/Navbar";
 import AppErrorBoundary from "@/components/AppErrorBoundary";
-import SupportChat from "@/components/SupportChat";
 import { RouteTransitionLoader } from "@/components/loading/LoadingUI";
 import ConnectionStatusBanner from "@/components/ConnectionStatusBanner";
 import { trackPageView } from "@/lib/analytics";
@@ -230,7 +229,6 @@ const AppRoutes = () => (
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
-      <SupportChat />
     </RoutingDataProvider>
   </BrowserRouter>
 );

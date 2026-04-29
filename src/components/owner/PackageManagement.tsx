@@ -6,13 +6,23 @@ import { Badge } from "../ui/badge";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Checkbox } from "../ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { getOwnerPackages, deleteOwnerPackage, getOwnerBoats, addOwnerPackage, updateOwnerPackage, OwnerBoat, OwnerPackage } from "../../lib/owner-dashboard";
 
 const PackageManagement = () => {
   const [packages, setPackages] = useState<OwnerPackage[]>([]);
   const [boats, setBoats] = useState<OwnerBoat[]>([]);
+  const [selectedBoatId, setSelectedBoatId] = useState<string>("all");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     name: "",
     duration: 3,
@@ -23,9 +33,22 @@ const PackageManagement = () => {
 
   useEffect(() => {
     const loadData = async () => {
-      const [nextPackages, nextBoats] = await Promise.all([getOwnerPackages(), getOwnerBoats()]);
-      setPackages(nextPackages);
-      setBoats(nextBoats);
+      try {
+        setIsLoading(true);
+        setLoadError(null);
+        const [nextPackages, nextBoats] = await Promise.all([getOwnerPackages(), getOwnerBoats()]);
+        setPackages(nextPackages);
+        setBoats(nextBoats);
+
+        if (nextBoats.length > 0 && selectedBoatId === "all") {
+          // Keep "all" as default; users can narrow down to a specific boat.
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load packages";
+        setLoadError(message);
+      } finally {
+        setIsLoading(false);
+      }
     };
 
     loadData();
@@ -103,6 +126,10 @@ const PackageManagement = () => {
     });
   };
 
+  const visiblePackages = selectedBoatId === "all"
+    ? packages
+    : packages.filter((pkg) => pkg.boatIds.includes(selectedBoatId));
+
   return (
     <div className="space-y-6">
       <Card className="shadow-card">
@@ -122,6 +149,42 @@ const PackageManagement = () => {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {loadError ? (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {loadError}
+            </div>
+          ) : null}
+
+          {isLoading ? (
+            <div className="space-y-3">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div key={`pkg-skeleton-${index}`} className="rounded-xl border border-border p-4 space-y-2">
+                  <div className="h-5 w-40 rounded bg-muted animate-pulse" />
+                  <div className="h-4 w-56 rounded bg-muted/80 animate-pulse" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <>
+          {boats.length > 0 && (
+            <div className="space-y-2">
+              <Label htmlFor="package-boat-select">Filter by boat</Label>
+              <Select value={selectedBoatId} onValueChange={setSelectedBoatId}>
+                <SelectTrigger id="package-boat-select">
+                  <SelectValue placeholder="All boats" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All boats</SelectItem>
+                  {boats.map((boat) => (
+                    <SelectItem key={boat.id} value={boat.id}>
+                      {boat.name} ({boat.location})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           {showForm && (
             <form onSubmit={handleSubmit} className="rounded-xl border border-border p-4 space-y-4 bg-muted/20">
               <div className="flex items-center justify-between mb-3">
@@ -223,9 +286,9 @@ const PackageManagement = () => {
             </form>
           )}
 
-          {packages.length > 0 ? (
+          {visiblePackages.length > 0 ? (
             <div className="space-y-3">
-              {packages.map((pkg) => (
+              {visiblePackages.map((pkg) => (
                 <div
                   key={pkg.id}
                   className="rounded-xl border border-border p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
@@ -233,11 +296,23 @@ const PackageManagement = () => {
                   <div className="space-y-1">
                     <p className="font-semibold text-foreground">{pkg.name}</p>
                     <p className="text-sm text-muted-foreground">{pkg.description}</p>
-                    <div className="flex items-center gap-2 mt-2">
+                    <div className="flex flex-wrap items-center gap-2 mt-2">
                       <Badge variant="outline">{pkg.duration}h</Badge>
                       <Badge className="bg-emerald-500">€{pkg.price}</Badge>
-                      {pkg.boatIds.length > 0 && (
-                        <Badge variant="outline">{pkg.boatIds.length} boat{pkg.boatIds.length !== 1 ? "s" : ""}</Badge>
+                      {pkg.boatIds.length > 0 ? (
+                        pkg.boatIds.map((boatId) => {
+                          const boat = boats.find((b) => b.id === boatId);
+                          if (!boat) return null;
+                          return (
+                            <Badge key={boatId} variant="outline" className="text-xs">
+                              {boat.name}
+                            </Badge>
+                          );
+                        })
+                      ) : (
+                        <Badge variant="outline" className="text-xs">
+                          No boats linked yet
+                        </Badge>
                       )}
                     </div>
                   </div>
@@ -267,6 +342,8 @@ const PackageManagement = () => {
             </div>
           ) : (
             <p className="text-center py-8 text-muted-foreground">No packages created yet.</p>
+          )}
+            </>
           )}
         </CardContent>
       </Card>

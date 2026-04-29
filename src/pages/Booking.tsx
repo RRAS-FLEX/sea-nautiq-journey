@@ -15,6 +15,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { confirmBookingWorkflow, getAvailableDepartureTimes, getRecommendedDepartureTimes, type ConfirmBookingResult, type DepartureRecommendation } from "@/lib/booking-workflow";
+import { resolveBoatVoucherPricing } from "@/lib/booking-pricing";
 import { buildBoatDetailsPath, buildBoatPublicSlug, getBoatByPublicReference, getBoats } from "@/lib/boats";
 import type { Boat } from "@/lib/boats";
 import { trackBookingConfirmed, trackBookingStarted } from "@/lib/analytics";
@@ -23,30 +24,45 @@ import { supabase } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { Skeleton } from "@/components/ui/skeleton";
 
-const packages = [
-  { id: "three-hours", label: "3 Hour Escape", hours: 3, multiplier: 0.45, baseFuelLitres: 24, vibe: "Quick swim stops and golden-hour speed." },
-  { id: "half-day", label: "Half Day", hours: 5, multiplier: 0.72, baseFuelLitres: 38, vibe: "The most balanced mix of cruising and island time." },
-  { id: "full-day", label: "Full Day", hours: 8, multiplier: 1, baseFuelLitres: 62, vibe: "The full cinematic route with multiple bays and lunch stops." },
-] as const;
+type BoatPackage = {
+  id: string;
+  name: string;
+  hours: number;
+  price: number;
+  description?: string | null;
+};
 
-type PaymentMethod = "stripe" | "manual";
-
-const paymentMethodOptions: Array<{ id: PaymentMethod; label: string; description: string }> = [
-  { id: "stripe", label: "Stripe Checkout", description: "Card, Apple Pay, Google Pay, and more" },
-  { id: "manual", label: "Choose payment plan", description: "Reserve now, pay in cash or card on arrival" },
-];
+type PaymentMethod = "stripe";
 
 type OwnerPackageJoinRow = {
   package_id: string;
   owner_packages: {
+    id?: string | null;
+    name?: string | null;
+    duration_hours?: number | null;
+    price?: number | null;
+    description?: string | null;
+  } | null;
+};
+
+type OwnerExtraJoinRow = {
+  extra_id: string;
+  owner_extras: {
+    id?: string | null;
     name?: string | null;
     price?: number | null;
+    description?: string | null;
   } | null;
 };
 
 type BookingRealtimeRow = {
   start_date?: string | null;
+};
+
+type OilPriceSettingsRow = {
+  value?: number | string | null;
 };
 
 const Booking = () => {
@@ -64,6 +80,7 @@ const Booking = () => {
     : undefined;
   const [boat, setBoat] = useState<Boat | null>(null);
   const [isBoatLoading, setIsBoatLoading] = useState(true);
+  const [boatPackages, setBoatPackages] = useState<BoatPackage[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -105,9 +122,10 @@ const Booking = () => {
       cancelled = true;
     };
   }, [boatReference, boatNameFromQuery]);
+
   const boatName = boat?.name ?? boatNameFromQuery;
   const dailyRate = boat?.pricePerDay ?? 450;
-  const [selectedPackageId, setSelectedPackageId] = useState<(typeof packages)[number]["id"]>("half-day");
+  const [selectedPackageId, setSelectedPackageId] = useState<string | null>(null);
   const [fuelLitres, setFuelLitres] = useState([40]);
   const [guestCount, setGuestCount] = useState(4);
   const [includeSkipper, setIncludeSkipper] = useState(true);
@@ -120,16 +138,31 @@ const Booking = () => {
   const [customerName, setCustomerName] = useState(sessionUser?.name ?? "");
   const [customerEmail, setCustomerEmail] = useState(sessionUser?.email ?? "");
   const [specialRequests, setSpecialRequests] = useState("");
+  // voucher support removed
   const [workflowResult, setWorkflowResult] = useState<ConfirmBookingResult | null>(null);
   const [availableDepartureTimes, setAvailableDepartureTimes] = useState<string[]>([]);
   const [departureRecommendations, setDepartureRecommendations] = useState<DepartureRecommendation[]>([]);
   const [isLoadingDepartureTimes, setIsLoadingDepartureTimes] = useState(false);
+  const [isCalendarLoading, setIsCalendarLoading] = useState(false);
   const [bookingsRealtimeTick, setBookingsRealtimeTick] = useState(0);
+  const [calendarRealtimeTick, setCalendarRealtimeTick] = useState(0);
   const [liveAvailabilityNotice, setLiveAvailabilityNotice] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
+  const paymentMethod: PaymentMethod = "stripe";
   const [paymentPlan, setPaymentPlan] = useState<"deposit" | "full" | null>(null);
   const [bookingStep, setBookingStep] = useState<1 | 2 | 3 | 4>(1);
   const [autoUnavailableDates, setAutoUnavailableDates] = useState<Date[]>([]);
+  const [oilPricePerLitre, setOilPricePerLitre] = useState(1.95);
+  const partyStartTime = "18:00";
+  const partyDurationHours = 8;
+
+  useEffect(() => {
+    if (boat?.partyReady) {
+      setIncludeSkipper(false);
+      setIncludeFlexibleCancellation(false);
+      setPaymentPlan("full");
+      setDepartureTime(partyStartTime);
+    }
+  }, [boat?.partyReady]);
 
   useEffect(() => {
     if (sessionUser?.name && !customerName) {
@@ -148,8 +181,8 @@ const Booking = () => {
       }
 
       const { data, error } = await supabase
-        .from("owner_package_boats")
-        .select("package_id, owner_packages(name, price)")
+        .from("owner_extra_boats")
+        .select("extra_id, owner_extras(id, name, price, description)")
         .eq("boat_id", boat.id);
 
       if (error || !Array.isArray(data)) {
@@ -157,12 +190,12 @@ const Booking = () => {
         return;
       }
 
-      const mapped = (data as OwnerPackageJoinRow[])
-        .filter((row) => row.owner_packages?.name)
+      const mapped = (data as OwnerExtraJoinRow[])
+        .filter((row) => row.owner_extras?.name)
         .map((row) => ({
-          id: row.package_id,
-          label: row.owner_packages.name,
-          price: Number(row.owner_packages.price ?? 0),
+          id: row.extra_id,
+          label: row.owner_extras!.name ?? "Extra",
+          price: Number(row.owner_extras!.price ?? 0),
         }));
 
       setOwnerUpgrades(mapped);
@@ -178,19 +211,97 @@ const Booking = () => {
     }
   }, [boat?.skipperRequired]);
 
-  const selectedPackage = packages.find((pkg) => pkg.id === selectedPackageId) ?? packages[1];
-  const basePackagePrice = Math.round(dailyRate * selectedPackage.multiplier);
-  const fuelPricePerLitre = 1.95;
-  const showFuelEstimate = !boat?.skipperRequired;
-  const fuelCost = showFuelEstimate ? Math.round(fuelLitres[0] * fuelPricePerLitre) : 0;
-  const skipperCost = includeSkipper ? Math.round(selectedPackage.hours * 28) : 0;
-  const guestExperienceFee = Math.max(guestCount - 4, 0) * 18;
-  const flexibleCancellationCost = includeFlexibleCancellation ? Math.round(basePackagePrice * 0.12) : 0;
+  useEffect(() => {
+    const loadBoatPackages = async () => {
+      if (!boat?.id) {
+        setBoatPackages([]);
+        setSelectedPackageId(null);
+        return;
+      }
+
+      let cancelled = false;
+
+      const { data, error } = await supabase
+        .from("owner_package_boats")
+        .select("owner_packages(id, name, duration_hours, price, description)")
+        .eq("boat_id", boat.id);
+
+      if (cancelled) return;
+
+      if (error || !Array.isArray(data)) {
+        setBoatPackages([]);
+        setSelectedPackageId(null);
+        return;
+      }
+
+      const BOAT_EXTRA_MARKER = "[boat-extra]";
+
+      const corePackages: BoatPackage[] = (data as OwnerPackageJoinRow[])
+        .map((row) => row.owner_packages)
+        .filter((pkg) => pkg && (!pkg.description || !String(pkg.description).includes(BOAT_EXTRA_MARKER)))
+        .map((pkg) => ({
+          id: String(pkg.id),
+          name: String(pkg.name ?? "Package"),
+          hours: Number(pkg.duration_hours ?? 0),
+          price: Number(pkg.price ?? 0),
+          description: pkg.description ?? "",
+        }))
+        .filter((pkg) => pkg.hours > 0);
+
+      setBoatPackages(corePackages);
+      setSelectedPackageId((previous) => {
+        if (previous && corePackages.some((pkg) => pkg.id === previous)) {
+          return previous;
+        }
+        return corePackages[0]?.id ?? null;
+      });
+
+      return () => {
+        cancelled = true;
+      };
+    };
+
+    loadBoatPackages();
+  }, [boat?.id]);
+
+  const selectedPackage: BoatPackage = useMemo(() => {
+    const fromBoat = boatPackages.find((pkg) => pkg.id === selectedPackageId) ?? boatPackages[0];
+    if (fromBoat) return fromBoat;
+
+    // Fallback: if no predefined durations exist yet, use the boat's daily rate
+    return {
+      id: "daily-rate",
+      name: "Daily rate",
+      // Default to a 5-hour trip so availability and pricing logic work
+      // even when the owner has not configured packages yet.
+      hours: 5,
+      price: dailyRate,
+      description: "",
+    };
+  }, [boatPackages, selectedPackageId, dailyRate]);
+
+  const isPartyBooking = Boolean(boat?.partyReady);
+  const ticketMaxPeople = boat ? (boat.ticketMaxPeople > 0 ? boat.ticketMaxPeople : boat.capacity) : 0;
+  const ticketPricePerPerson = boat
+    ? (boat.ticketPricePerPerson > 0 ? boat.ticketPricePerPerson : boat.capacity > 0 ? boat.pricePerDay / boat.capacity : 0)
+    : 0;
+  const guestLimit = isPartyBooking ? Math.max(1, ticketMaxPeople) : (boat?.capacity ?? 12);
+  const ticketQuantity = isPartyBooking ? Math.min(Math.max(guestCount, 1), guestLimit) : guestCount;
+  const ticketSubtotal = isPartyBooking ? ticketPricePerPerson * ticketQuantity : 0;
+  const formatEuroAmount = (value: number) => `€${value.toFixed(value % 1 === 0 ? 0 : 2)}`;
+  const bookingDurationHours = isPartyBooking ? partyDurationHours : selectedPackage.hours;
+
+  const basePackagePrice = isPartyBooking ? ticketSubtotal : selectedPackage.price;
+  const showFuelEstimate = !boat?.skipperRequired && !isPartyBooking;
+  const fuelCost = showFuelEstimate ? Math.round(fuelLitres[0] * oilPricePerLitre) : 0;
+  const skipperCost = isPartyBooking ? 0 : (includeSkipper ? Math.round(selectedPackage.hours * 28) : 0);
+  const guestExperienceFee = isPartyBooking ? 0 : Math.max(guestCount - 4, 0) * 18;
+  const flexibleCancellationCost = isPartyBooking ? 0 : (includeFlexibleCancellation ? Math.round(basePackagePrice * 0.12) : 0);
   const extrasCost = ownerUpgrades
     .filter((item) => selectedExtras.includes(item.id))
     .reduce((total, item) => total + item.price, 0);
-  const crazySeaRoutingFee = selectedPackageId === "full-day" ? 95 : 0;
-  const suggestedFuelLitres = Math.min(120, selectedPackage.baseFuelLitres + Math.max(guestCount - 4, 0) * 2);
+  const crazySeaRoutingFee = isPartyBooking ? 0 : (selectedPackage.hours >= 8 ? 95 : 0);
+  const suggestedFuelLitres = Math.min(120, bookingDurationHours * 8 + Math.max(guestCount - 4, 0) * 2);
   const staticUnavailableDates = useMemo(
     () => boat?.availability.unavailableDates.map((date) => parseISO(date)) ?? [],
     [boat],
@@ -219,36 +330,35 @@ const Booking = () => {
     ? `${apiBaseUrl.replace(/\/$/, "")}/api/stripe/create-checkout`
     : "/api/stripe/create-checkout";
 
-  const estimatedTotal = useMemo(
-    () =>
-      basePackagePrice +
+  const preDiscountTotal = isPartyBooking
+    ? ticketSubtotal + extrasCost
+    : basePackagePrice +
       fuelCost +
       skipperCost +
       guestExperienceFee +
       flexibleCancellationCost +
       extrasCost +
-      crazySeaRoutingFee,
-    [
-      basePackagePrice,
-      crazySeaRoutingFee,
-      extrasCost,
-      flexibleCancellationCost,
-      fuelCost,
-      guestExperienceFee,
-      skipperCost,
-    ],
-  );
+      crazySeaRoutingFee;
+
+  const pricing = resolveBoatVoucherPricing({
+    baseTotalPrice: preDiscountTotal,
+    bookingDate: selectedDate ? format(selectedDate, "yyyy-MM-dd") : format(new Date(), "yyyy-MM-dd"),
+    departureTime: departureTime || "10:00",
+    flashSaleEnabled: Boolean(boat?.flashSaleEnabled),
+    paymentPlan: paymentPlan ?? "full",
+  });
+
+  const estimatedTotal = pricing.discountedTotal;
 
   const platformCommission = Math.round(estimatedTotal * 0.15);
   const ownerPayout = Math.max(estimatedTotal - platformCommission, 0);
-  const depositAmount = Math.round(estimatedTotal * 0.3);
-  const amountDueNow = paymentPlan === "deposit" ? depositAmount : estimatedTotal;
-  const canContinueStep1 = Boolean(selectedDate && availableDepartureTimes.includes(departureTime));
+  const depositAmount = pricing.depositAmount;
+  const amountDueNow = pricing.amountDueNow;
+  const canContinueStep1 = isPartyBooking ? Boolean(selectedDate) : Boolean(selectedDate && availableDepartureTimes.includes(departureTime));
   const canContinueStep2 = Boolean(customerName.trim() && customerEmail.trim());
-  const canContinueStep3 = Boolean(
-    paymentMethod &&
-    paymentPlan,
-  );
+  const canContinueStep3 = Boolean(paymentPlan);
+  const bookingStepCount = isPartyBooking ? 3 : 4;
+  const finalBookingStep = isPartyBooking ? 3 : 4;
 
   const selectedExtraLabels = useMemo(
     () => ownerUpgrades.filter((item) => selectedExtras.includes(item.id)).map((item) => item.label),
@@ -256,18 +366,82 @@ const Booking = () => {
   );
 
   useEffect(() => {
+    // Keep fuel price in sync with Supabase global_settings.oil_price_per_liter
+    let cancelled = false;
+
+    const loadOilPrice = async () => {
+      const { data, error } = await supabase
+        .from("global_settings")
+        .select("value")
+        .eq("key", "oil_price_per_liter")
+        .maybeSingle();
+
+      const row = data as OilPriceSettingsRow | null;
+      if (!cancelled && !error && row && row.value != null) {
+        const next = Number(row.value);
+        if (Number.isFinite(next) && next > 0) {
+          setOilPricePerLitre(next);
+        }
+      }
+    };
+
+    loadOilPrice();
+
+    const channel = supabase
+      .channel("global-settings-oil-price")
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "global_settings",
+          filter: "key=eq.oil_price_per_liter",
+        },
+        (payload) => {
+          const row = (payload.new ?? payload.old) as OilPriceSettingsRow | null;
+          if (!row || typeof row.value === "undefined" || row.value === null) return;
+          const next = Number(row.value);
+          if (Number.isFinite(next) && next > 0) {
+            setOilPricePerLitre(next);
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!boat?.id) {
       setAutoUnavailableDates([]);
+      setIsCalendarLoading(false);
       return;
     }
 
     let cancelled = false;
     const computeAutoUnavailable = async () => {
+      if (!boat?.id || bookingDurationHours <= 0) {
+        if (!cancelled) {
+          setAutoUnavailableDates([]);
+          setIsCalendarLoading(false);
+        }
+        return;
+      }
+
       const today = startOfDay(new Date());
-      const horizonDays = 30;
+      // Keep calendar responsive: only precompute about 10 days ahead.
+      const horizonDays = 10;
       const daysToCheck = Array.from({ length: horizonDays }, (_, index) => addDays(today, index));
 
       const dynamicDates: Date[] = [];
+
+      if (!cancelled) {
+        setIsCalendarLoading(true);
+      }
+
       for (const date of daysToCheck) {
         if (cancelled) return;
 
@@ -277,16 +451,18 @@ const Booking = () => {
         }
 
         const isoDate = format(date, "yyyy-MM-dd");
-        const availableTimes = await getAvailableDepartureTimes(boat.id, isoDate, selectedPackage.hours);
+        const availableTimesForDay = await getAvailableDepartureTimes(boat.id, isoDate, bookingDurationHours);
         if (cancelled) return;
 
-        if (availableTimes.length === 0) {
+        // Mark dates as unavailable only when there are no free departure slots left
+        if (availableTimesForDay.length === 0) {
           dynamicDates.push(date);
         }
       }
 
       if (!cancelled) {
         setAutoUnavailableDates(dynamicDates);
+        setIsCalendarLoading(false);
       }
     };
 
@@ -294,10 +470,24 @@ const Booking = () => {
 
     return () => {
       cancelled = true;
+      setIsCalendarLoading(false);
     };
-  }, [boat?.id, selectedPackage.hours, staticUnavailableDates]);
+  }, [boat?.id, bookingDurationHours, staticUnavailableDates, bookingsRealtimeTick, calendarRealtimeTick]);
 
   useEffect(() => {
+    if (isPartyBooking) {
+      if (!boat?.id || !selectedDate) {
+        setAvailableDepartureTimes([]);
+        setDepartureRecommendations([]);
+        return;
+      }
+
+      setAvailableDepartureTimes([partyStartTime]);
+      setDepartureRecommendations([]);
+      setDepartureTime(partyStartTime);
+      return;
+    }
+
     let cancelled = false;
 
     const loadAvailableTimes = async () => {
@@ -327,7 +517,7 @@ const Booking = () => {
         const nextRecommendations = await getRecommendedDepartureTimes(
           boat.id,
           format(selectedDate, "yyyy-MM-dd"),
-          selectedPackage.hours,
+          bookingDurationHours,
         );
 
         if (cancelled) {
@@ -360,7 +550,7 @@ const Booking = () => {
     return () => {
       cancelled = true;
     };
-  }, [boat?.id, boat?.name, bookingsRealtimeTick, hasDateIntent, navigate, selectedDate, selectedPackage.hours, unavailableDates]);
+  }, [boat?.id, boat?.name, bookingsRealtimeTick, bookingDurationHours, hasDateIntent, isPartyBooking, navigate, partyStartTime, selectedDate, unavailableDates]);
 
   useEffect(() => {
     if (!boat?.id || !selectedDate) {
@@ -394,6 +584,32 @@ const Booking = () => {
       supabase.removeChannel(channel);
     };
   }, [boat?.id, selectedDate]);
+
+  useEffect(() => {
+    if (!boat?.id) {
+      return;
+    }
+
+    const channel = supabase
+      .channel(`booking-calendar-events-${boat.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "calendar_events",
+          filter: `boat_id=eq.${boat.id}`,
+        },
+        () => {
+          setCalendarRealtimeTick((value) => value + 1);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [boat?.id]);
 
   useEffect(() => {
     if (bookingsRealtimeTick <= 0) {
@@ -455,26 +671,17 @@ const Booking = () => {
       return;
     }
 
-    if (availableDepartureTimes.length === 0 || !availableDepartureTimes.includes(departureTime)) {
+    if (isPartyBooking ? departureTime !== partyStartTime : availableDepartureTimes.length === 0 || !availableDepartureTimes.includes(departureTime)) {
       navigate(
         `/booking-closed?boat=${encodeURIComponent(boat.name)}&date=${encodeURIComponent(selectedDate.toISOString().slice(0, 10))}&reason=${encodeURIComponent("slot-unavailable")}`,
       );
       return;
     }
 
-    if (selectedPackage.hours > 8) {
+    if (!isPartyBooking && selectedPackage.hours > 8) {
       toast({
         title: tl("Package too long", "Το πακέτο είναι πολύ μεγάλο"),
         description: tl("Customers cannot book a boat for more than 8 hours.", "Οι πελάτες δεν μπορούν να κλείσουν σκάφος για περισσότερες από 8 ώρες."),
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!paymentMethod) {
-      toast({
-        title: tl("Select payment method", "Επίλεξε τρόπο πληρωμής"),
-        description: tl("Choose a payment method before confirming.", "Επίλεξε τρόπο πληρωμής πριν την επιβεβαίωση."),
         variant: "destructive",
       });
       return;
@@ -508,7 +715,9 @@ const Booking = () => {
             customerId: sessionUser?.id,
             bookingDate: format(selectedDate, "yyyy-MM-dd"),
             departureTime,
-            packageHours: selectedPackage.hours,
+            packageHours: bookingDurationHours,
+            guests: guestCount,
+            preDiscountTotal,
             totalPrice: estimatedTotal,
             amountDueNow,
             paymentPlan,
@@ -571,15 +780,18 @@ const Booking = () => {
         ownerName: boat.owner.name || "Owner",
         customerName: customerName.trim(),
         customerEmail: customerEmail.trim().toLowerCase(),
-        packageLabel: selectedPackage.label,
-        packageHours: selectedPackage.hours,
-        guests: guestCount,
+        packageLabel: isPartyBooking ? "Party tickets" : selectedPackage.name,
+        packageHours: bookingDurationHours,
+        guests: ticketQuantity,
         date: format(selectedDate, "yyyy-MM-dd"),
         departureTime,
         departureMarina: boat.departureMarina,
         totalPrice: estimatedTotal,
         paymentMethod,
         paymentPlan,
+        // voucher fields removed
+        flashSaleEnabled: Boolean(boat.flashSaleEnabled),
+        partyReady: Boolean(boat.partyReady),
         amountDueNow,
         depositAmount,
         platformCommission,
@@ -610,7 +822,7 @@ const Booking = () => {
       boatId: boat.id,
       boatName: boat.name,
       totalPrice: estimatedTotal,
-      guests: guestCount,
+      guests: ticketQuantity,
       paymentMethod,
     });
     toast({
@@ -621,7 +833,7 @@ const Booking = () => {
     });
 
     navigate(
-      `/booking-confirmed?bookingId=${encodeURIComponent(result.booking.id)}&boat=${encodeURIComponent(result.booking.boatName)}&date=${encodeURIComponent(result.booking.date)}&departure=${encodeURIComponent(result.booking.departureTime)}&amount=${encodeURIComponent(String(amountDueNow))}&emailQueued=${encodeURIComponent(String(Boolean(result.customerEmail)))}&ownerNotified=${encodeURIComponent("true")}`,
+      `/booking-confirmed?bookingId=${encodeURIComponent(result.booking.id)}&boat=${encodeURIComponent(result.booking.boatName)}&date=${encodeURIComponent(result.booking.date)}&departure=${encodeURIComponent(result.booking.departureTime)}&amount=${encodeURIComponent(String(amountDueNow))}&emailQueued=${encodeURIComponent(String(Boolean(result.customerEmail)))}&ownerNotified=${encodeURIComponent("true")}&partyTicketCode=${encodeURIComponent(String(result.booking.partyTicketCode ?? ""))}&partyTicketCount=${encodeURIComponent(String(result.booking.partyTicketCount ?? 0))}&partyTicketStatus=${encodeURIComponent(String(result.booking.partyTicketStatus ?? ""))}&partyTicketPrice=${encodeURIComponent(String(ticketPricePerPerson))}&partyTicketQuantity=${encodeURIComponent(String(ticketQuantity))}`,
     );
   };
 
@@ -653,13 +865,13 @@ const Booking = () => {
             </p>
             <div className="flex flex-wrap gap-2 mt-5">
               <Badge className="bg-primary-foreground/15 text-primary-foreground border-primary-foreground/20">
-                {tl("Live package pricing", "Ζωντανή τιμολόγηση πακέτων")}
+                {isPartyBooking ? tl("Ticket pricing", "Τιμολόγηση εισιτηρίων") : tl("Live pricing", "Ζωντανή τιμολόγηση")}
               </Badge>
               <Badge className="bg-primary-foreground/15 text-primary-foreground border-primary-foreground/20">
-                {tl("Fuel-sensitive estimate", "Εκτίμηση βάσει καυσίμων")}
+                {isPartyBooking ? tl("Max guest list", "Μέγιστη λίστα καλεσμένων") : tl("Fuel-sensitive estimate", "Εκτίμηση βάσει καυσίμων")}
               </Badge>
               <Badge className="bg-primary-foreground/15 text-primary-foreground border-primary-foreground/20">
-                {tl("Owner notification workflow", "Ροή ειδοποίησης ιδιοκτήτη")}
+                {isPartyBooking ? tl("Party booking workflow", "Ροή κράτησης πάρτι") : tl("Owner notification workflow", "Ροή ειδοποίησης ιδιοκτήτη")}
               </Badge>
             </div>
           </div>
@@ -671,12 +883,12 @@ const Booking = () => {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <CalendarDays className="h-5 w-5 text-aegean" />
-                  {tl("Booking details", "Λεπτομέρειες κράτησης")}
+                  {isPartyBooking ? tl("Party booking details", "Λεπτομέρειες κράτησης πάρτι") : tl("Booking details", "Λεπτομέρειες κράτησης")}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="grid grid-cols-4 gap-2">
-                  {[1, 2, 3, 4].map((step) => (
+                <div className={`grid gap-2 ${bookingStepCount === 3 ? "grid-cols-3" : "grid-cols-4"}`}>
+                  {Array.from({ length: bookingStepCount }, (_, index) => index + 1).map((step) => (
                     <div key={step} className="space-y-1">
                       <div className={`h-1 rounded-full ${step <= bookingStep ? "bg-aegean" : "bg-muted"}`} />
                       <p className={`text-xs ${step === bookingStep ? "text-foreground" : "text-muted-foreground"}`}>Step {step}</p>
@@ -688,41 +900,109 @@ const Booking = () => {
                 <>
                 <div className="rounded-2xl border border-border p-4 bg-muted/10 space-y-4">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-foreground">Sector 1: Trip package</p>
+                    <p className="text-sm font-semibold text-foreground">{isPartyBooking ? "Sector 1: Ticket plan" : "Sector 1: Trip plan"}</p>
                     <Badge variant="outline">Core</Badge>
                   </div>
                   <Input value={boatName} readOnly />
-                  <div className="space-y-3">
-                    <p className="text-sm font-medium text-foreground">Choose your packet</p>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      {packages.map((pkg) => (
-                        <button
-                          key={pkg.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedPackageId(pkg.id);
-                            setFuelLitres([pkg.baseFuelLitres]);
-                          }}
-                          className={`rounded-2xl border p-4 text-left transition-all ${
-                            selectedPackageId === pkg.id
-                              ? "border-aegean bg-aegean/5 shadow-card"
-                              : "border-border hover:border-aegean/40"
-                          }`}
-                        >
-                          <p className="font-semibold text-foreground">{pkg.label}</p>
-                          <p className="text-sm text-muted-foreground">{pkg.hours} hours</p>
-                          <p className="text-xs text-muted-foreground mt-2">{pkg.vibe}</p>
-                        </button>
-                      ))}
+                  {isPartyBooking ? (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-foreground space-y-2">
+                      <p className="font-semibold">Ticket-based party booking</p>
+                      <p className="text-muted-foreground">
+                        Choose the date and guest list. Your ticket price stays tied to the party booking, not fuel or skipper options.
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                        <div className="rounded-xl bg-background border border-amber-200 p-3">
+                          <p className="text-xs text-muted-foreground">Ticket price</p>
+                          <p className="font-semibold text-foreground">{ticketPricePerPerson > 0 ? formatEuroAmount(ticketPricePerPerson) : "Contact for price"}</p>
+                        </div>
+                        <div className="rounded-xl bg-background border border-amber-200 p-3">
+                          <p className="text-xs text-muted-foreground">Tickets</p>
+                          <p className="font-semibold text-foreground">{ticketQuantity}</p>
+                        </div>
+                        <div className="rounded-xl bg-background border border-amber-200 p-3">
+                          <p className="text-xs text-muted-foreground">Total</p>
+                          <p className="font-semibold text-foreground">{ticketPricePerPerson > 0 ? formatEuroAmount(ticketSubtotal) : "Contact for price"}</p>
+                        </div>
+                      </div>
                     </div>
+                  ) : null}
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium text-foreground">{isPartyBooking ? "Choose your ticket quantity" : "Choose your trip"}</p>
+                    {isPartyBooking ? (
+                      <div className="rounded-2xl border border-border p-4 bg-background space-y-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-foreground">Party tickets</p>
+                            <p className="text-xs text-muted-foreground">Add more tickets to grow the guest list.</p>
+                          </div>
+                          <Badge variant="outline">{ticketMaxPeople > 0 ? `Max ${ticketMaxPeople}` : "Ticketed"}</Badge>
+                        </div>
+                        <div className="grid grid-cols-[auto,1fr,auto] items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setGuestCount((current) => Math.max(1, current - 1))}
+                            className="h-10 w-10 rounded-xl border border-border hover:border-aegean flex items-center justify-center text-base font-semibold transition-colors"
+                            aria-label="Remove ticket"
+                          >
+                            −
+                          </button>
+                          <div className="text-center">
+                            <p className="text-xs text-muted-foreground">Tickets</p>
+                            <p className="text-2xl font-heading font-bold text-foreground tabular-nums">{ticketQuantity}</p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setGuestCount((current) => Math.min(guestLimit, current + 1))}
+                            className="h-10 w-10 rounded-xl border border-border hover:border-aegean flex items-center justify-center text-base font-semibold transition-colors"
+                            aria-label="Add ticket"
+                          >
+                            +
+                          </button>
+                        </div>
+                        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 flex items-center justify-between gap-3 text-sm">
+                          <span className="text-muted-foreground">{ticketPricePerPerson > 0 ? `€${ticketPricePerPerson.toFixed(ticketPricePerPerson % 1 === 0 ? 0 : 2)} × ${ticketQuantity}` : "Ticket total"}</span>
+                          <span className="font-semibold text-foreground">{ticketPricePerPerson > 0 ? formatEuroAmount(ticketSubtotal) : "Contact for price"}</span>
+                        </div>
+                      </div>
+                    ) : boatPackages.length > 0 ? (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        {boatPackages.map((pkg) => (
+                          <button
+                            key={pkg.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedPackageId(pkg.id);
+                              setFuelLitres([Math.max(24, pkg.hours * 8)]);
+                            }}
+                            className={`rounded-2xl border p-4 text-left transition-all ${
+                              selectedPackageId === pkg.id
+                                ? "border-aegean bg-aegean/5 shadow-card"
+                                : "border-border hover:border-aegean/40"
+                            }`}
+                          >
+                            <p className="font-semibold text-foreground">{pkg.name}</p>
+                            <p className="text-sm text-muted-foreground">{pkg.hours} hours</p>
+                            {isPartyBooking ? <p className="text-xs text-muted-foreground mt-1">Ticketed party package</p> : null}
+                            {pkg.description ? (
+                              <p className="text-xs text-muted-foreground mt-2">{pkg.description}</p>
+                            ) : null}
+                            <p className="text-sm text-aegean mt-2">€{pkg.price}</p>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        This boat has no predefined trip durations yet. Pricing will use the standard daily rate.
+                      </p>
+                    )}
                   </div>
                 </div>
 
                 <div className="rounded-2xl border border-border p-4 bg-muted/10 space-y-5">
                   <div className="flex items-center justify-between">
                     <div className="space-y-1">
-                      <p className="text-sm font-semibold text-foreground">Sector 2: Trip date &amp; departure</p>
-                      <p className="text-xs text-muted-foreground">Pick your trip day, a free departure time, and how many guests join.</p>
+                      <p className="text-sm font-semibold text-foreground">{isPartyBooking ? "Sector 2: Party date &amp; guest list" : "Sector 2: Trip date &amp; departure"}</p>
+                      <p className="text-xs text-muted-foreground">{isPartyBooking ? `Pick the event day. Boarding opens at ${partyStartTime} and guests can arrive after that time.` : "Pick your trip day, a free departure time, and how many guests join."}</p>
                     </div>
                     <Badge variant="outline">Schedule</Badge>
                   </div>
@@ -784,25 +1064,35 @@ const Booking = () => {
                           Grey dates are in the past, red are already booked.
                         </p>
                       </div>
-                      <div className="overflow-x-auto pb-1">
-                        <div className="min-w-[340px] w-full flex justify-center">
-                          <Calendar
-                            mode="single"
-                            selected={selectedDate}
-                            onSelect={(date) => {
-                              setSelectedDate(date);
-                              if (date) {
-                                setHasDateIntent(true);
+                      <div className="relative">
+                        {isCalendarLoading && (
+                          <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/40 rounded-2xl">
+                            <div className="h-8 w-8 border-2 border-aegean border-t-transparent rounded-full animate-spin" />
+                          </div>
+                        )}
+                        <div className="overflow-x-auto pb-1">
+                          <div className="min-w-[340px] w-full flex justify-center">
+                            <Calendar
+                              mode="single"
+                              selected={selectedDate}
+                              onSelect={(date) => {
+                                setSelectedDate(date);
+                                if (date) {
+                                  setHasDateIntent(true);
+                                }
+                              }}
+                              disabled={(date) =>
+                                date < startOfDay(new Date()) ||
+                                unavailableDates.some((blocked) => isSameDay(blocked, date))
                               }
-                            }}
-                            disabled={(date) =>
-                              date < startOfDay(new Date()) ||
-                              unavailableDates.some((blocked) => isSameDay(blocked, date))
-                            }
-                            modifiers={{ unavailable: unavailableDates }}
-                            modifiersClassNames={{ unavailable: "!text-destructive line-through !opacity-80 cursor-not-allowed" }}
-                            className="rounded-2xl border border-border bg-background w-[340px] max-w-full"
-                          />
+                              modifiers={{ unavailable: unavailableDates }}
+                              modifiersClassNames={{
+                                unavailable:
+                                  "!bg-destructive/10 !text-destructive !border-destructive/40 line-through !opacity-90 cursor-not-allowed",
+                              }}
+                              className="rounded-2xl border border-border bg-background w-[340px] max-w-full"
+                            />
+                          </div>
                         </div>
                       </div>
                       {/* Legend */}
@@ -828,60 +1118,75 @@ const Booking = () => {
 
                     {/* Departure time chips + guest stepper */}
                     <div className="rounded-3xl border border-border p-4 bg-muted/20 space-y-5">
-                      <div className="space-y-2.5">
-                        <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
-                          <Clock className="h-3.5 w-3.5 text-aegean" />
-                          Departure time
-                        </p>
-                        <div className="grid grid-cols-3 gap-1.5">
-                          {(availableDepartureTimes.length > 0 ? availableDepartureTimes : ["07:00","08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00"]).map((slot, index) => (
-                            <button
-                              key={slot}
-                              type="button"
-                              disabled={!selectedDate || !availableDepartureTimes.includes(slot)}
-                              onClick={() => setDepartureTime(slot)}
-                              className={`text-xs rounded-xl border py-2 transition-colors ${
-                                departureTime === slot
-                                  ? "border-aegean bg-aegean/10 text-aegean font-semibold"
-                                  : selectedDate && availableDepartureTimes.includes(slot)
-                                    ? "border-border hover:border-aegean/50 text-muted-foreground hover:text-foreground"
-                                    : "border-border text-muted-foreground/40 cursor-not-allowed"
-                              }`}
-                            >
-                              {slot}{index === 0 && availableDepartureTimes.length > 0 ? " ★" : ""}
-                            </button>
-                          ))}
+                      {isPartyBooking ? (
+                        <div className="space-y-3">
+                          <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                            <Clock className="h-3.5 w-3.5 text-aegean" />
+                            Party start time
+                          </p>
+                          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-1.5">
+                            <p className="text-lg font-semibold text-foreground">From {partyStartTime}</p>
+                            <p className="text-xs text-muted-foreground">
+                              Boarding opens at this time. Guests can arrive after the start and board whenever they want.
+                            </p>
+                          </div>
                         </div>
-                        <p className="text-xs text-muted-foreground">
-                          {isLoadingDepartureTimes
-                            ? "Checking free departure windows…"
-                            : !selectedDate
-                              ? "Choose a date first to see which departure times are free."
-                              : availableDepartureTimes.length > 0
-                                ? `Free starts for ${selectedPackage.hours}h trip: ${availableDepartureTimes.length}`
-                                : "No valid slots for this date and package—try another day or package length."}
-                        </p>
-                        {liveAvailabilityNotice ? (
-                          <p className="text-xs text-aegean">
-                            Live availability updated just now. Times shown are refreshed in real time.
+                      ) : (
+                        <div className="space-y-2.5">
+                          <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                            <Clock className="h-3.5 w-3.5 text-aegean" />
+                            Departure time
                           </p>
-                        ) : null}
-                        {departureRecommendations[0]?.reasons?.[0] ? (
-                          <p className="text-xs text-aegean">
-                            Suggested start: {departureRecommendations[0].departureTime} ({departureRecommendations[0].reasons[0]}).
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {(availableDepartureTimes.length > 0 ? availableDepartureTimes : ["07:00","08:00","09:00","10:00","11:00","12:00","13:00","14:00","15:00","16:00","17:00","18:00"]).map((slot, index) => (
+                              <button
+                                key={slot}
+                                type="button"
+                                disabled={!selectedDate || !availableDepartureTimes.includes(slot)}
+                                onClick={() => setDepartureTime(slot)}
+                                className={`text-xs rounded-xl border py-2 transition-colors ${
+                                  departureTime === slot
+                                    ? "border-aegean bg-aegean/10 text-aegean font-semibold"
+                                    : selectedDate && availableDepartureTimes.includes(slot)
+                                      ? "border-border hover:border-aegean/50 text-muted-foreground hover:text-foreground"
+                                      : "border-border text-muted-foreground/40 cursor-not-allowed"
+                                }`}
+                              >
+                                {slot}{index === 0 && availableDepartureTimes.length > 0 ? " ★" : ""}
+                              </button>
+                            ))}
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            {isLoadingDepartureTimes
+                              ? "Checking free departure windows…"
+                              : !selectedDate
+                                ? "Choose a date first to see which departure times are free."
+                                : availableDepartureTimes.length > 0
+                                  ? `Free starts for ${selectedPackage.hours}h trip: ${availableDepartureTimes.length}`
+                                  : "No valid slots for this date and package—try another day or package length."}
                           </p>
-                        ) : null}
-                        {selectedPackageId === "half-day" ? (
-                          <p className="text-xs text-aegean">
-                            Tip: half-day slots fill quickly—pick an available time now to secure your trip.
-                          </p>
-                        ) : null}
-                      </div>
+                          {liveAvailabilityNotice ? (
+                            <p className="text-xs text-aegean">
+                              Live availability updated just now. Times shown are refreshed in real time.
+                            </p>
+                          ) : null}
+                          {departureRecommendations[0]?.reasons?.[0] ? (
+                            <p className="text-xs text-aegean">
+                              Suggested start: {departureRecommendations[0].departureTime} ({departureRecommendations[0].reasons[0]}).
+                            </p>
+                          ) : null}
+                          {selectedPackage.hours === 5 ? (
+                            <p className="text-xs text-aegean">
+                              Tip: half-day slots fill quickly—pick an available time now to secure your trip.
+                            </p>
+                          ) : null}
+                        </div>
+                      )}
 
                       <div className="space-y-2.5">
                         <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
                           <Users className="h-3.5 w-3.5 text-aegean" />
-                          Guests
+                          {isPartyBooking ? "Tickets / guests" : "Guests"}
                         </p>
                         <div className="flex items-center gap-2">
                           <button
@@ -895,13 +1200,13 @@ const Booking = () => {
                           <span className="w-8 text-center font-semibold tabular-nums text-foreground">{guestCount}</span>
                           <button
                             type="button"
-                            onClick={() => setGuestCount((c) => Math.min(boat?.capacity ?? 12, c + 1))}
+                            onClick={() => setGuestCount((c) => Math.min(guestLimit, c + 1))}
                             className="h-9 w-9 rounded-xl border border-border hover:border-aegean flex items-center justify-center text-base font-semibold transition-colors"
                             aria-label="Add guest"
                           >
                             +
                           </button>
-                          <span className="text-xs text-muted-foreground">/ {boat?.capacity ?? 12} max</span>
+                          <span className="text-xs text-muted-foreground">/ {guestLimit} max</span>
                         </div>
                       </div>
                     </div>
@@ -925,9 +1230,11 @@ const Booking = () => {
                           <div>
                             <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Departure</p>
                             <p className="text-sm font-semibold text-foreground">
-                              {departureTime
-                                ? `${departureTime} · ${boat?.departureMarina ?? "marina"}`
-                                : "Select a departure time"}
+                              {isPartyBooking
+                                ? `From ${partyStartTime} · boarding open after start`
+                                : departureTime
+                                  ? `${departureTime} · ${boat?.departureMarina ?? "marina"}`
+                                  : "Select a departure time"}
                             </p>
                           </div>
                         </div>
@@ -935,10 +1242,11 @@ const Booking = () => {
                           <Users className="h-4 w-4 text-aegean shrink-0" />
                           <div>
                             <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Guests</p>
+                            {isPartyBooking ? <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Tickets</p> : null}
                             <p className="text-sm font-semibold text-foreground">{guestCount}</p>
                           </div>
                         </div>
-                        {departureTime ? (
+                        {!isPartyBooking && departureTime ? (
                           <div className="flex items-center gap-2 sm:ml-auto">
                             <CalendarDays className="h-4 w-4 text-muted-foreground shrink-0" />
                             <div>
@@ -948,7 +1256,7 @@ const Booking = () => {
                                   const [h, m] = departureTime.split(":").map(Number);
                                   const dep = new Date(selectedDate);
                                   dep.setHours(h, m, 0, 0);
-                                  return format(addHours(dep, selectedPackage.hours), "HH:mm");
+                                  return format(addHours(dep, bookingDurationHours), "HH:mm");
                                 })()}
                               </p>
                             </div>
@@ -966,7 +1274,7 @@ const Booking = () => {
                 {bookingStep === 2 ? (
                 <div className="rounded-2xl border border-border p-4 bg-muted/10 space-y-4">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-foreground">Sector 3: Customer details</p>
+                    <p className="text-sm font-semibold text-foreground">{isPartyBooking ? "Sector 3: Guest details" : "Sector 3: Customer details"}</p>
                     <Badge variant="outline">Identity</Badge>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -989,11 +1297,35 @@ const Booking = () => {
                 {bookingStep === 2 ? (
                 <div className="rounded-2xl border border-border p-4 bg-muted/10 space-y-4">
                   <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-foreground">Sector 4: Experience and add-ons</p>
-                    <Badge variant="outline">Custom</Badge>
+                    <p className="text-sm font-semibold text-foreground">{isPartyBooking ? "Sector 4: Party setup" : "Sector 4: Experience and add-ons"}</p>
+                    <Badge variant="outline">{isPartyBooking ? "Party" : "Custom"}</Badge>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {showFuelEstimate ? (
+                    {isPartyBooking ? (
+                      <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 md:col-span-2">
+                        <p className="text-sm font-medium text-foreground flex items-center gap-2">
+                          <Sparkles className="h-4 w-4 text-aegean" />
+                          Party booking setup
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          This booking uses ticket pricing instead of fuel and skipper controls. The guest count below becomes your ticket list for check-in.
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+                          <div className="rounded-xl border border-amber-200 bg-background p-3">
+                            <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Ticket price</p>
+                            <p className="text-lg font-semibold text-foreground">{ticketPricePerPerson > 0 ? formatEuroAmount(ticketPricePerPerson) : "Contact for price"}</p>
+                          </div>
+                          <div className="rounded-xl border border-amber-200 bg-background p-3">
+                            <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Max people</p>
+                            <p className="text-lg font-semibold text-foreground">{ticketMaxPeople > 0 ? `${ticketMaxPeople}` : "On request"}</p>
+                          </div>
+                          <div className="rounded-xl border border-amber-200 bg-background p-3">
+                            <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Current tickets</p>
+                            <p className="text-lg font-semibold text-foreground">{guestCount}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : showFuelEstimate ? (
                     <div className="space-y-3 rounded-2xl border border-aegean/20 bg-aegean/5 p-4">
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-sm font-medium text-foreground flex items-center gap-2">
@@ -1029,7 +1361,7 @@ const Booking = () => {
                         <p className="text-[11px] text-muted-foreground uppercase tracking-wide">Estimated fuel cost</p>
                         <p className="text-lg font-semibold text-foreground">€{fuelCost}</p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          Live rate: €{fuelPricePerLitre.toFixed(2)}/L. Adjust based on route and sea conditions.
+                          Live rate: €{oilPricePerLitre.toFixed(2)}/L. Adjust based on route and sea conditions.
                         </p>
                       </div>
                     </div>
@@ -1039,32 +1371,49 @@ const Booking = () => {
                       </div>
                     )}
 
-                    <div className="space-y-4 rounded-2xl border border-border p-4 bg-muted/30">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-medium text-foreground">Include skipper</p>
-                          <p className="text-xs text-muted-foreground">
-                            {boat?.skipperRequired
-                              ? "Required by this boat owner"
-                              : "Professional captain for smoother routing"}
-                          </p>
+                    {isPartyBooking ? (
+                      <div className="space-y-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-medium text-foreground">Party rules</p>
+                            <p className="text-xs text-muted-foreground">Keep music, drinks, and guest list aligned before checkout.</p>
+                          </div>
                         </div>
-                        <Switch checked={includeSkipper} onCheckedChange={setIncludeSkipper} disabled={boat?.skipperRequired} />
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-medium text-foreground">Flexible cancellation</p>
-                          <p className="text-xs text-muted-foreground">Extra protection if weather or timing shifts</p>
+                        <div className="rounded-xl border border-amber-200 bg-background p-3 text-sm text-muted-foreground space-y-1">
+                          <p className="font-medium text-foreground">What changes here</p>
+                          <p>• No fuel calculator</p>
+                          <p>• No skipper toggle</p>
+                          <p>• Guest count is treated as ticket count</p>
                         </div>
-                        <Switch checked={includeFlexibleCancellation} onCheckedChange={setIncludeFlexibleCancellation} />
                       </div>
-                    </div>
+                    ) : (
+                      <div className="space-y-4 rounded-2xl border border-border p-4 bg-muted/30">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-medium text-foreground">Include skipper</p>
+                            <p className="text-xs text-muted-foreground">
+                              {boat?.skipperRequired
+                                ? "Required by this boat owner"
+                                : "Professional captain for smoother routing"}
+                            </p>
+                          </div>
+                          <Switch checked={includeSkipper} onCheckedChange={setIncludeSkipper} disabled={boat?.skipperRequired} />
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-medium text-foreground">Flexible cancellation</p>
+                            <p className="text-xs text-muted-foreground">Extra protection if weather or timing shifts</p>
+                          </div>
+                          <Switch checked={includeFlexibleCancellation} onCheckedChange={setIncludeFlexibleCancellation} />
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="space-y-3">
                     <p className="text-sm font-medium text-foreground flex items-center gap-2">
                       <Sparkles className="h-4 w-4 text-aegean" />
-                      Owner upgrades
+                      {isPartyBooking ? "Party upgrades" : "Owner upgrades"}
                     </p>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {ownerUpgrades.map((extra) => {
@@ -1091,7 +1440,7 @@ const Booking = () => {
                     </div>
                     {ownerUpgrades.length === 0 ? (
                       <p className="text-xs text-muted-foreground rounded-xl border border-dashed border-border p-3">
-                        No owner upgrades added for this boat yet.
+                        {isPartyBooking ? "No party upgrades added for this boat yet." : "No owner upgrades added for this boat yet."}
                       </p>
                     ) : null}
                   </div>
@@ -1100,73 +1449,54 @@ const Booking = () => {
                 </div>
                 ) : null}
 
-                {bookingStep === 3 ? (
+                {bookingStep === 3 && !isPartyBooking ? (
                   <div className="rounded-2xl border border-border p-4 bg-muted/10 space-y-4">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-foreground">Sector 5: Payment setup</p>
-                      <Badge variant="outline">Payment</Badge>
+                      <p className="text-sm font-semibold text-foreground">{isPartyBooking ? "Sector 5: Ticket payment" : "Sector 5: Payment"}</p>
+                      <Badge variant="outline">Card via Stripe</Badge>
                     </div>
 
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium text-foreground">Choose payment method</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {paymentMethodOptions.map((method) => (
-                          <button
-                            key={method.id}
-                            type="button"
-                            onClick={() => {
-                              setPaymentMethod(method.id);
-                              if (!paymentPlan) {
-                                setPaymentPlan("deposit");
-                              }
-                            }}
-                            className={`rounded-xl border px-3 py-2 text-sm text-left transition-colors ${
-                              paymentMethod === method.id
-                                ? "border-aegean bg-aegean/10 text-aegean"
-                                : "border-border text-muted-foreground hover:text-foreground"
-                            }`}
-                          >
-                            <p className="font-medium">{method.label}</p>
-                            <p className="text-xs opacity-80">{method.description}</p>
-                          </button>
-                        ))}
+                    <div className="space-y-3">
+                      <p className="text-sm font-medium text-foreground">How much do you want to pay now?</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setPaymentPlan("deposit")}
+                          className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                            paymentPlan === "deposit"
+                              ? "border-aegean bg-aegean/10 text-aegean"
+                              : "border-border text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          30% deposit (card)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPaymentPlan("full")}
+                          className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
+                            paymentPlan === "full"
+                              ? "border-aegean bg-aegean/10 text-aegean"
+                              : "border-border text-muted-foreground hover:text-foreground"
+                          }`}
+                        >
+                          Pay full now (card)
+                        </button>
                       </div>
                     </div>
 
-                    {paymentMethod ? (
-                      <div className="space-y-2">
-                        <p className="text-sm font-medium text-foreground">Choose payment plan</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setPaymentPlan("deposit")}
-                            className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
-                              paymentPlan === "deposit"
-                                ? "border-aegean bg-aegean/10 text-aegean"
-                                : "border-border text-muted-foreground hover:text-foreground"
-                            }`}
-                          >
-                            30% deposit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setPaymentPlan("full")}
-                            className={`rounded-xl border px-3 py-2 text-sm font-medium transition-colors ${
-                              paymentPlan === "full"
-                                ? "border-aegean bg-aegean/10 text-aegean"
-                                : "border-border text-muted-foreground hover:text-foreground"
-                            }`}
-                          >
-                            Pay full now
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
+                    {/* Voucher input removed */}
 
-                    {paymentMethod === "stripe" ? (
-                      <div className="rounded-2xl border border-aegean/30 bg-aegean/5 p-3">
-                        <p className="text-sm font-medium text-foreground">Stripe Checkout</p>
-                        <p className="text-xs text-muted-foreground mt-1">You'll be redirected to secure Stripe Checkout where you can pay with card, Apple Pay, Google Pay, or other methods.</p>
+                    <div className="rounded-2xl border border-aegean/30 bg-aegean/5 p-3 space-y-1.5">
+                      <p className="text-sm font-medium text-foreground">Card payment via Stripe</p>
+                      <p className="text-xs text-muted-foreground">
+                        You will be redirected to secure Stripe Checkout to pay by card (including Apple Pay / Google Pay where available).
+                      </p>
+                    </div>
+
+                    {pricing.flashSaleDiscount > 0 ? (
+                      <div className="rounded-2xl border border-emerald-400/30 bg-emerald-50 p-3">
+                        <p className="text-sm font-medium text-foreground">Last-minute flash sale applied</p>
+                        <p className="text-xs text-muted-foreground">You saved €{pricing.flashSaleDiscount} because this departure is still unbooked within 24 hours.</p>
                       </div>
                     ) : null}
 
@@ -1174,18 +1504,52 @@ const Booking = () => {
                       <p className="text-xs text-muted-foreground">Due now</p>
                       <p className="text-lg font-semibold text-foreground">€{amountDueNow}</p>
                       <p className="text-xs text-muted-foreground">
-                        {paymentPlan === "deposit"
-                          ? `Remaining at harbor: €${Math.max(estimatedTotal - depositAmount, 0)}`
-                          : "No remaining balance at harbor."}
+                        {isPartyBooking
+                          ? `Ticket flow locked for ${guestCount} guests${ticketMaxPeople > 0 ? ` of ${ticketMaxPeople} max` : ""}.`
+                          : paymentPlan === "deposit"
+                            ? `Remaining at harbor (card or cash): €${Math.max(estimatedTotal - depositAmount, 0)}`
+                            : "No remaining balance at harbor — full amount is paid online by card."}
                       </p>
                     </div>
                   </div>
                 ) : null}
 
-                {bookingStep === 4 ? (
+                {bookingStep === 3 && isPartyBooking ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-foreground">Sector 3: Review party booking</p>
+                      <Badge variant="outline">Ticket flow</Badge>
+                    </div>
+
+                    <div className="rounded-2xl border border-amber-200 bg-background p-4 space-y-2 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">Ticket price</span>
+                        <span className="text-foreground font-medium">{ticketPricePerPerson > 0 ? formatEuroAmount(ticketPricePerPerson) : "Contact for price"}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">Tickets selected</span>
+                        <span className="text-foreground font-medium">{ticketQuantity}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">Total</span>
+                        <span className="text-foreground font-medium">{ticketPricePerPerson > 0 ? formatEuroAmount(ticketSubtotal) : "Contact for price"}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-muted-foreground">Payment</span>
+                        <span className="text-foreground font-medium">Full ticket payment</span>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-muted-foreground">
+                      Party bookings skip fuel and skipper pricing. Confirming will issue the ticket list and notify the owner.
+                    </p>
+                  </div>
+                ) : null}
+
+                {bookingStep === 4 && !isPartyBooking ? (
                   <div className="rounded-2xl border border-border p-4 bg-muted/10 space-y-4">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm font-semibold text-foreground">Sector 6: Review and confirm</p>
+                      <p className="text-sm font-semibold text-foreground">{isPartyBooking ? "Sector 6: Review ticket booking" : "Sector 6: Review and confirm"}</p>
                       <Badge variant="outline">Final step</Badge>
                     </div>
 
@@ -1196,7 +1560,7 @@ const Booking = () => {
                       </div>
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-muted-foreground">Package</span>
-                        <span className="text-foreground font-medium">{selectedPackage.label}</span>
+                        <span className="text-foreground font-medium">{selectedPackage.name}</span>
                       </div>
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-muted-foreground">Date</span>
@@ -1210,6 +1574,18 @@ const Booking = () => {
                         <span className="text-muted-foreground">Guests</span>
                         <span className="text-foreground font-medium">{guestCount}</span>
                       </div>
+                      {isPartyBooking ? (
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">Ticket price</span>
+                          <span className="text-foreground font-medium">{ticketPricePerPerson > 0 ? formatEuroAmount(ticketPricePerPerson) : "Contact for price"}</span>
+                        </div>
+                      ) : null}
+                      {pricing.flashSaleDiscount > 0 ? (
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-muted-foreground">Flash sale</span>
+                          <span className="text-emerald-600 font-medium">-€{pricing.flashSaleDiscount}</span>
+                        </div>
+                      ) : null}
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-muted-foreground">Due now</span>
                         <span className="text-foreground font-semibold">€{amountDueNow}</span>
@@ -1242,7 +1618,7 @@ const Booking = () => {
                       Continue
                     </Button>
                   ) : null}
-                  {bookingStep === 3 ? (
+                  {bookingStep === 3 && !isPartyBooking ? (
                     <Button type="button" onClick={() => setBookingStep(4)} disabled={!canContinueStep3} className="bg-gradient-accent text-accent-foreground">
                       Continue
                     </Button>
@@ -1252,7 +1628,143 @@ const Booking = () => {
             </Card>
 
             {boat ? (
-              <div className="space-y-6 lg:col-span-1">
+              <Card className="shadow-card h-fit lg:col-span-1 lg:sticky lg:top-24">
+                <CardHeader>
+                    <CardTitle>{isPartyBooking ? "Ticket summary" : "Payment summary"}</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="rounded-2xl border border-border bg-muted/10 p-4 space-y-2">
+                    <p className="text-sm font-semibold text-foreground">{isPartyBooking ? "Step 1: Review ticket cost" : "Step 1: Review trip cost"}</p>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-center justify-between"><span className="text-muted-foreground">{isPartyBooking ? "Tickets" : selectedPackage.name}</span><span className="text-foreground">{isPartyBooking ? ticketQuantity : `€${basePackagePrice}`}</span></div>
+                      {isPartyBooking ? (
+                        <>
+                          <div className="flex items-center justify-between"><span className="text-muted-foreground">Unit price</span><span className="text-foreground">{ticketPricePerPerson > 0 ? formatEuroAmount(ticketPricePerPerson) : "Contact"}</span></div>
+                          <div className="flex items-center justify-between"><span className="text-muted-foreground">Total</span><span className="text-foreground">{ticketPricePerPerson > 0 ? formatEuroAmount(ticketSubtotal) : "Contact"}</span></div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between"><span className="text-muted-foreground">Fuel ({fuelLitres[0]}L)</span><span className="text-foreground">€{fuelCost}</span></div>
+                          <div className="flex items-center justify-between"><span className="text-muted-foreground">Skipper</span><span className="text-foreground">€{skipperCost}</span></div>
+                          <div className="flex items-center justify-between"><span className="text-muted-foreground">Guest experience uplift</span><span className="text-foreground">€{guestExperienceFee}</span></div>
+                          <div className="flex items-center justify-between"><span className="text-muted-foreground">Flexible cancellation</span><span className="text-foreground">€{flexibleCancellationCost}</span></div>
+                          <div className="flex items-center justify-between"><span className="text-muted-foreground">Sea routing fee</span><span className="text-foreground">€{crazySeaRoutingFee}</span></div>
+                        </>
+                      )}
+                      <div className="flex items-center justify-between"><span className="text-muted-foreground">Add-ons</span><span className="text-foreground">€{extrasCost}</span></div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-border bg-muted/10 p-4">
+                    <p className="text-sm font-semibold text-foreground">Step 2: Estimated total</p>
+                    <p className="text-sm text-muted-foreground">Estimated total</p>
+                    <p className="text-3xl font-heading font-bold text-foreground">€{estimatedTotal}</p>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">{isPartyBooking ? "Ticket payment goes through Stripe Checkout. Platform retains 20% commission, 80% goes directly to boat owner." : "Step 3: Your payment goes through Stripe Checkout. Platform retains 20% commission, 80% goes directly to boat owner."}</p>
+
+                  <div className="rounded-2xl border border-border bg-muted/10 p-4 space-y-2 text-sm">
+                    <p className="text-sm font-semibold text-foreground">{isPartyBooking ? "Step 3: Ticket snapshot" : "Step 4: Booking snapshot"}</p>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Boat</span>
+                      <span className="text-foreground font-medium">{boatName}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Day</span>
+                      <span className="text-foreground font-medium">{selectedDate ? format(selectedDate, "d MMM yyyy") : "Pick a date"}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Departure</span>
+                      <span className="text-foreground font-medium">{departureTime || "Select time"}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Payment method</span>
+                      <span className="text-foreground font-medium">Card via Stripe Checkout</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Payment plan</span>
+                      <span className="text-foreground font-medium">
+                        {isPartyBooking
+                          ? "Ticket booking"
+                          : paymentPlan === "deposit"
+                            ? "30% deposit"
+                            : paymentPlan === "full"
+                              ? "Pay full now"
+                              : "Select plan"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <ShieldCheck className="h-3.5 w-3.5 text-aegean" />
+                    Secure checkout and verified owner
+                  </p>
+
+                  {bookingStep === finalBookingStep ? <p className="text-xs text-muted-foreground">{isPartyBooking ? "Step 5: Confirm ticket booking workflow." : "Step 8: Confirm and send booking workflow."}</p> : null}
+                  {bookingStep === finalBookingStep ? (
+                    <Button className="w-full bg-gradient-accent text-accent-foreground gap-2" onClick={handleConfirmBooking}>
+                      <CreditCard className="h-4 w-4" />
+                      Confirm booking (€{amountDueNow} now)
+                    </Button>
+                  ) : null}
+                  <Button asChild variant="outline" className="w-full">
+                    <Link to={boatProfileLink}>Back to boat profile</Link>
+                  </Button>
+
+                  {workflowResult ? (
+                    <div className="rounded-2xl border border-aegean/30 bg-aegean/5 p-4 space-y-4">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 rounded-full bg-aegean/15 p-2 text-aegean">
+                          <CalendarCheck2 className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-foreground">Booking workflow completed</p>
+                          <p className="text-sm text-muted-foreground">Reference {workflowResult.booking.id}</p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 text-sm">
+                        <div className="rounded-2xl border border-border bg-background p-3">
+                          <p className="font-medium text-foreground">Owner notification</p>
+                          <p className="text-muted-foreground mt-1">{workflowResult.ownerNotification.subject}</p>
+                          <p className="text-xs text-muted-foreground mt-2">Queued to {workflowResult.ownerNotification.ownerEmail}</p>
+                        </div>
+
+                        {workflowResult.customerEmail ? (
+                          <div className="rounded-2xl border border-border bg-background p-3">
+                            <div className="flex items-center gap-2">
+                              <Mail className="h-4 w-4 text-aegean" />
+                              <p className="font-medium text-foreground">Customer confirmation email</p>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-2">To: {workflowResult.customerEmail.toEmail}</p>
+                            <p className="text-xs text-muted-foreground">Subject: {workflowResult.customerEmail.subject}</p>
+                            <pre className="mt-3 whitespace-pre-wrap break-words rounded-xl bg-muted/40 p-3 text-xs text-muted-foreground font-sans">{workflowResult.customerEmail.body}</pre>
+                          </div>
+                        ) : (
+                          <div className="rounded-2xl border border-border bg-background p-3 space-y-1">
+                            <p className="font-medium text-foreground">In-app confirmation</p>
+                            <p className="text-xs text-muted-foreground">
+                              Email queue skipped for Google sign-in booking. Confirmation is available in your profile and booking record.
+                            </p>
+                          </div>
+                        )}
+
+                        <Button asChild variant="outline" className="w-full">
+                          <Link
+                            to={`/post-trip-review?bookingId=${encodeURIComponent(workflowResult.booking.id)}&boatRef=${encodeURIComponent(boat?.publicSlug || (boat ? buildBoatPublicSlug(boat) : workflowResult.booking.boatId))}&boat=${encodeURIComponent(workflowResult.booking.boatName)}`}
+                          >
+                            Post trip review
+                          </Link>
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {boat ? (
+              <div className="space-y-6 lg:col-span-2">
                 <Card className="shadow-card h-fit">
                   <CardHeader>
                     <CardTitle>Meet your host</CardTitle>
@@ -1295,179 +1807,42 @@ const Booking = () => {
                   </CardContent>
                 </Card>
 
-                <Card className="shadow-card h-fit">
-              <CardHeader>
-                <CardTitle>Payment summary</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {bookingStep === 4 ? (
-                <div className="rounded-2xl border border-border bg-muted/10 p-4 space-y-2">
-                  <p className="text-sm font-semibold text-foreground">Step 1: Review trip cost</p>
-                  <div className="space-y-2 text-sm">
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">{selectedPackage.label}</span><span className="text-foreground">€{basePackagePrice}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Fuel ({fuelLitres[0]}L)</span><span className="text-foreground">€{fuelCost}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Skipper</span><span className="text-foreground">€{skipperCost}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Guest experience uplift</span><span className="text-foreground">€{guestExperienceFee}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Flexible cancellation</span><span className="text-foreground">€{flexibleCancellationCost}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Sea routing fee</span><span className="text-foreground">€{crazySeaRoutingFee}</span></div>
-                  <div className="flex items-center justify-between"><span className="text-muted-foreground">Add-ons</span><span className="text-foreground">€{extrasCost}</span></div>
+                <Card className="relative z-0 shadow-card h-fit overflow-hidden">
+                  <div className="relative z-0 aspect-[4/3] border-b border-border overflow-hidden">
+                    <BoatLocationMap
+                      points={[
+                        {
+                          id: boat.id,
+                          name: boat.name,
+                          query: boat.mapQuery,
+                          subtitle: `${boat.departureMarina} • ${boat.location}`,
+                        },
+                      ]}
+                      selectedPointId={boat.id}
+                      emptyLabel="Meeting point map is unavailable."
+                      loadingLabel="Loading meeting point map…"
+                      heightClassName="h-full"
+                    />
                   </div>
-                </div>
-                ) : null}
-
-                {bookingStep === 4 ? (
-                <div className="rounded-2xl border border-border bg-muted/10 p-4">
-                  <p className="text-sm font-semibold text-foreground">Step 2: Estimated total</p>
-                  <p className="text-sm text-muted-foreground">Estimated total</p>
-                  <p className="text-3xl font-heading font-bold text-foreground">€{estimatedTotal}</p>
-                </div>
-                ) : null}
-
-                <p className="text-xs text-muted-foreground">Step 3: Your payment goes through Stripe Checkout. Platform retains 20% commission, 80% goes directly to boat owner.</p>
-
-                {bookingStep === 4 ? (
-                <div className="rounded-2xl border border-border bg-muted/10 p-4 space-y-2 text-sm">
-                  <p className="text-sm font-semibold text-foreground">Step 4: Booking snapshot</p>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">Boat</span>
-                    <span className="text-foreground font-medium">{boatName}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">Day</span>
-                    <span className="text-foreground font-medium">{selectedDate ? format(selectedDate, "d MMM yyyy") : "Pick a date"}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">Departure</span>
-                    <span className="text-foreground font-medium">{departureTime}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">Payment method</span>
-                    <span className="text-foreground font-medium">{paymentMethod === "stripe" ? "Stripe Checkout" : paymentMethod === "manual" ? "Choose payment plan" : "Choose method"}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-muted-foreground">Payment plan</span>
-                    <span className="text-foreground font-medium">{paymentPlan === "deposit" ? "30% deposit" : paymentPlan === "full" ? "Pay full now" : "Choose plan"}</span>
-                  </div>
-                </div>
-                ) : null}
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <ShieldCheck className="h-3.5 w-3.5 text-aegean" />
-                  Secure checkout and verified owner
-                </p>
-
-                {bookingStep === 4 && paymentPlan === "deposit" ? (
-                  <div className="rounded-2xl border border-destructive/25 bg-destructive/5 p-3">
-                    <p className="text-xs text-destructive">
-                      Deposit is non-refundable after 48 hours from booking confirmation.
-                    </p>
-                  </div>
-                ) : null}
-
-                {bookingStep === 4 ? <p className="text-xs text-muted-foreground">Step 8: Confirm and send booking workflow.</p> : null}
-                {bookingStep === 4 ? (
-                <Button className="w-full bg-gradient-accent text-accent-foreground gap-2" onClick={handleConfirmBooking}>
-                  <CreditCard className="h-4 w-4" />
-                  Confirm booking (€{amountDueNow} now)
-                </Button>
-                ) : null}
-                <Button asChild variant="outline" className="w-full">
-                  <Link to={boatProfileLink}>Back to boat profile</Link>
-                </Button>
-
-                {workflowResult ? (
-                  <div className="rounded-2xl border border-aegean/30 bg-aegean/5 p-4 space-y-4">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 rounded-full bg-aegean/15 p-2 text-aegean">
-                        <CalendarCheck2 className="h-4 w-4" />
-                      </div>
-                      <div>
-                        <p className="font-semibold text-foreground">Booking workflow completed</p>
-                        <p className="text-sm text-muted-foreground">Reference {workflowResult.booking.id}</p>
-                      </div>
+                  <CardHeader>
+                    <CardTitle>Meeting point</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div>
+                      <p className="font-medium text-foreground">{boat.departureMarina}</p>
+                      <p className="text-sm text-muted-foreground">{boat.location}, Greece</p>
                     </div>
-
-                    <div className="space-y-3 text-sm">
-                      <div className="rounded-2xl border border-border bg-background p-3">
-                        <p className="font-medium text-foreground">Owner notification</p>
-                        <p className="text-muted-foreground mt-1">{workflowResult.ownerNotification.subject}</p>
-                        <p className="text-xs text-muted-foreground mt-2">Queued to {workflowResult.ownerNotification.ownerEmail}</p>
-                      </div>
-
-                      {workflowResult.customerEmail ? (
-                        <div className="rounded-2xl border border-border bg-background p-3">
-                          <div className="flex items-center gap-2">
-                            <Mail className="h-4 w-4 text-aegean" />
-                            <p className="font-medium text-foreground">Customer confirmation email</p>
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-2">To: {workflowResult.customerEmail.toEmail}</p>
-                          <p className="text-xs text-muted-foreground">Subject: {workflowResult.customerEmail.subject}</p>
-                          <pre className="mt-3 whitespace-pre-wrap break-words rounded-xl bg-muted/40 p-3 text-xs text-muted-foreground font-sans">{workflowResult.customerEmail.body}</pre>
-                        </div>
-                      ) : (
-                        <div className="rounded-2xl border border-border bg-background p-3 space-y-1">
-                          <p className="font-medium text-foreground">In-app confirmation</p>
-                          <p className="text-xs text-muted-foreground">
-                            Email queue skipped for Google sign-in booking. Confirmation is available in your profile and booking record.
-                          </p>
-                        </div>
-                      )}
-
-                      <Button asChild variant="outline" className="w-full">
-                        <Link
-                          to={`/post-trip-review?bookingId=${encodeURIComponent(workflowResult.booking.id)}&boatRef=${encodeURIComponent(boat?.publicSlug || (boat ? buildBoatPublicSlug(boat) : workflowResult.booking.boatId))}&boat=${encodeURIComponent(workflowResult.booking.boatName)}`}
-                        >
-                          Post trip review
-                        </Link>
+                    <div className="grid grid-cols-1 gap-3">
+                      <Button asChild className="bg-gradient-accent text-accent-foreground">
+                        <a href={googleDirectionsUrl} target="_blank" rel="noreferrer">
+                          <Navigation className="mr-2 h-4 w-4" />
+                          Open directions
+                        </a>
                       </Button>
-                      {boat ? (
-                        <Button asChild variant="outline" className="w-full">
-                          <Link to={`/chat?boatRef=${encodeURIComponent(boat.publicSlug || buildBoatPublicSlug(boat))}&boat=${encodeURIComponent(boat.name)}`}>
-                            <MessageCircle className="mr-2 h-4 w-4" />{tl("Chat with owner", "Συνομιλία με ιδιοκτήτη")}
-                          </Link>
-                        </Button>
-                      ) : null}
                     </div>
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-
-            <Card className="relative z-0 shadow-card h-fit overflow-hidden">
-              <div className="relative z-0 aspect-[4/3] border-b border-border overflow-hidden">
-                <BoatLocationMap
-                  points={[
-                    {
-                      id: boat.id,
-                      name: boat.name,
-                      query: boat.mapQuery,
-                      subtitle: `${boat.departureMarina} • ${boat.location}`,
-                    },
-                  ]}
-                  selectedPointId={boat.id}
-                  emptyLabel="Meeting point map is unavailable."
-                  loadingLabel="Loading meeting point map…"
-                  heightClassName="h-full"
-                />
+                  </CardContent>
+                </Card>
               </div>
-              <CardHeader>
-                <CardTitle>Meeting point</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <p className="font-medium text-foreground">{boat.departureMarina}</p>
-                  <p className="text-sm text-muted-foreground">{boat.location}, Greece</p>
-                </div>
-                <div className="grid grid-cols-1 gap-3">
-                  <Button asChild className="bg-gradient-accent text-accent-foreground">
-                    <a href={googleDirectionsUrl} target="_blank" rel="noreferrer">
-                      <Navigation className="mr-2 h-4 w-4" />
-                      Open directions
-                    </a>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
             ) : null}
           </div>
         </section>

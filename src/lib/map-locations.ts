@@ -3,6 +3,11 @@ export interface MapCoordinates {
   lng: number;
 }
 
+export interface ReverseGeocodeResult {
+  address: string;
+  city: string;
+}
+
 const MAP_CACHE_KEY = "nautiq:map-geocode-cache:v1";
 
 const DEFAULT_GREECE_COORDINATES: MapCoordinates = {
@@ -119,6 +124,48 @@ export const getDefaultMapCoordinates = () => DEFAULT_GREECE_COORDINATES;
 export const buildOpenStreetMapUrl = (query: string) => {
   const normalizedQuery = query.trim();
   return `https://www.openstreetmap.org/search?query=${encodeURIComponent(normalizedQuery || "Greece")}`;
+};
+
+export const reverseGeocodeCoordinates = async (coords: MapCoordinates): Promise<ReverseGeocodeResult> => {
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${encodeURIComponent(String(coords.lat))}&lon=${encodeURIComponent(String(coords.lng))}`;
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error("Reverse geocoding request failed");
+    }
+
+    const data = (await response.json()) as {
+      display_name?: string;
+      address?: { city?: string; town?: string; village?: string; hamlet?: string; suburb?: string; state?: string; country?: string };
+    };
+
+    const address = (data.display_name || "").trim();
+    const addressParts = data.address || {};
+    const city =
+      addressParts.city ||
+      addressParts.town ||
+      addressParts.village ||
+      addressParts.hamlet ||
+      addressParts.suburb ||
+      addressParts.state ||
+      addressParts.country ||
+      "";
+
+    return {
+      address,
+      city: city.trim(),
+    };
+  } catch {
+    return {
+      address: "",
+      city: "",
+    };
+  }
 };
 
 export const resolveMapCoordinates = async (query: string): Promise<MapCoordinates> => {

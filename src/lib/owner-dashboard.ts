@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { parseStorageReference, resolveStorageImage } from "./storage-public";
+import { uploadBoatImageToStorage } from "./boat-images";
 
 export interface BoatDocument {
   id?: string;
@@ -24,10 +25,15 @@ export interface OwnerBoat {
   cancellationPolicy: string;
   responseTime: string;
   mapQuery: string;
+  externalCalendarUrl: string;
+  flashSaleEnabled: boolean;
+  partyReady: boolean;
   unavailableDates: string[];
   minNoticeHours: number;
   capacity: number;
   pricePerDay: number;
+  ticketMaxPeople: number;
+  ticketPricePerPerson: number;
   rating: number;
   image: string;
   features: string[];
@@ -39,9 +45,11 @@ export interface OwnerBoat {
   documents: BoatDocument[];
 }
 
-type OwnerBoatMutation = Omit<OwnerBoat, "id" | "documentsFolder"> & {
+type OwnerBoatMutation = Omit<OwnerBoat, "id" | "documentsFolder" | "ticketMaxPeople" | "ticketPricePerPerson"> & {
   documentsFolder?: string;
   imageFile?: File | null;
+  ticketMaxPeople?: number;
+  ticketPricePerPerson?: number;
 };
 
 type OwnerBoatUpdateMutation = Partial<OwnerBoat> & {
@@ -70,6 +78,8 @@ export interface OwnerCalendarEvent {
   type: "booked" | "blocked" | "maintenance";
   guestName?: string;
   bookingId?: string;
+  startTime?: string | null;
+  endTime?: string | null;
 }
 
 export interface OwnerStats {
@@ -78,6 +88,27 @@ export interface OwnerStats {
   totalRevenue: number;
   averageRating: string;
 }
+
+export interface OwnerBooking {
+  id: string;
+  boatName: string;
+  customerName: string;
+  date: string;
+  departureTime: string;
+  guests: number;
+  status: string;
+  totalPrice: number;
+  endDate?: string | null;
+  endTime?: string | null;
+}
+
+const normalizeUnavailableDates = (raw: unknown): string[] => {
+  if (!Array.isArray(raw)) return [];
+  const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+  return raw
+    .map((value) => String(value || "").trim())
+    .filter((value) => dateRegex.test(value));
+};
 
 const getSession = async () => {
   const {
@@ -93,7 +124,21 @@ const getSession = async () => {
 
 const toSafeFileName = (value: string) => value.replace(/[^a-zA-Z0-9._-]+/g, "-");
 
-const getBoatDocumentsFolder = (ownerId: string, boatId: string) => `boat-documents/${ownerId}/${boatId}`;
+const stripDataUrl = (value: string | null | undefined) => {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("data:")) return "";
+  return trimmed;
+};
+
+const toNullableTrimmed = (value: unknown) => {
+  const trimmed = String(value ?? "").trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
+const toTrimmed = (value: unknown) => String(value ?? "").trim();
+
+const getTodayIsoDate = () => new Date().toISOString().slice(0, 10);
 
 const resolveDocumentUrl = async (filePath: string) => {
   if (!filePath) {
@@ -129,7 +174,7 @@ const mapBoatDocument = async (document: any): Promise<BoatDocument> => ({
 });
 
 const normalizeBoatImagePath = (value: string | null | undefined) => {
-  const trimmed = value?.trim() ?? "";
+  const trimmed = String(value ?? "").trim();
   if (!trimmed) return "";
   if (/\.\w{2,6}(\?|$)/.test(trimmed)) return trimmed;
   return `${trimmed.replace(/\/+$/, "")}/1.jpg`;
@@ -137,29 +182,10 @@ const normalizeBoatImagePath = (value: string | null | undefined) => {
 
 const resolveOwnerBoatImage = (boat: any) => {
   const candidate = normalizeBoatImagePath(boat.images ?? boat.image);
-  return resolveStorageImage(candidate, "boat-images", "https://via.placeholder.com/400x300?text=Boat");
+  return resolveStorageImage(candidate, "boat-images", "/placeholder.svg");
 };
 
-const uploadPrimaryBoatImage = async (ownerId: string, boatId: string, file: File) => {
-  const extension = (file.name.split(".").pop() ?? "jpg").toLowerCase();
-  const normalizedExt = extension.replace(/[^a-z0-9]/g, "") || "jpg";
-  const objectPath = `${ownerId}/${boatId}/1.${normalizedExt}`;
-
-  const { error } = await supabase.storage
-    .from("boat-images")
-    .upload(objectPath, file, {
-      upsert: true,
-      contentType: file.type || "image/jpeg",
-    });
-
-  if (error) {
-    throw new Error(error.message || "Failed to upload boat image");
-  }
-
-  return `boat-images/${ownerId}/${boatId}`;
-};
-
-const uploadBoatDocument = async (ownerId: string, boatId: string, document: BoatDocument) => {
+const uploadBoatDocument = async (basePath: string, document: BoatDocument) => {
   if (!(document.file instanceof File)) {
     return {
       name: document.name,
@@ -168,8 +194,9 @@ const uploadBoatDocument = async (ownerId: string, boatId: string, document: Boa
     };
   }
 
+  const safeBase = basePath.replace(/^\/+|\/+$/g, "");
   const safeName = toSafeFileName(document.file.name || document.name || "document");
-  const objectPath = `${ownerId}/${boatId}/${safeName}`;
+  const objectPath = `${safeBase}/${safeName}`;
 
   const { error } = await supabase.storage
     .from("boat-documents")
@@ -203,10 +230,15 @@ const mapOwnerBoat = (boat: any, features: string[], documents: BoatDocument[]):
   cancellationPolicy: boat.cancellation_policy ?? "",
   responseTime: boat.response_time ?? "",
   mapQuery: boat.map_query ?? "",
+  externalCalendarUrl: boat.external_calendar_url ?? "",
+  flashSaleEnabled: Boolean(boat.flash_sale_enabled),
+  partyReady: Boolean(boat.party_ready),
   unavailableDates: Array.isArray(boat.unavailable_dates) ? boat.unavailable_dates : [],
   minNoticeHours: Number(boat.min_notice_hours ?? 24),
   capacity: Number(boat.capacity ?? 0),
   pricePerDay: Number(boat.price_per_day ?? 0),
+  ticketMaxPeople: Number(boat.ticket_max_people ?? boat.capacity ?? 0),
+  ticketPricePerPerson: Number(boat.ticket_price_per_person ?? 0),
   rating: Number(boat.rating ?? 0),
   image: resolveOwnerBoatImage(boat),
   features,
@@ -259,6 +291,8 @@ export const addOwnerBoat = async (boat: OwnerBoatMutation): Promise<OwnerBoat> 
   const boatsTable = (supabase as any).from("boats");
   const featuresTable = (supabase as any).from("boat_features");
   const documentsTable = (supabase as any).from("boat_documents");
+  const safeFeatures = Array.isArray(boat.features) ? boat.features : [];
+  const safeDocuments = Array.isArray(boat.documents) ? boat.documents : [];
 
   const { data: insertedBoat, error } = await boatsTable
     .insert({
@@ -275,14 +309,20 @@ export const addOwnerBoat = async (boat: OwnerBoatMutation): Promise<OwnerBoat> 
       cancellation_policy: boat.cancellationPolicy,
       response_time: boat.responseTime,
       map_query: boat.mapQuery,
-      unavailable_dates: boat.unavailableDates,
+      external_calendar_url: toNullableTrimmed(boat.externalCalendarUrl),
+      flash_sale_enabled: Boolean(boat.flashSaleEnabled),
+      party_ready: Boolean(boat.partyReady),
+      // voucher fields removed
+      unavailable_dates: normalizeUnavailableDates(boat.unavailableDates),
       min_notice_hours: boat.minNoticeHours,
       capacity: boat.capacity,
       price_per_day: boat.pricePerDay,
+      ticket_max_people: boat.ticketMaxPeople,
+      ticket_price_per_person: boat.ticketPricePerPerson,
       rating: boat.rating,
-      images: boat.image,
+      images: stripDataUrl(boat.image),
       skipper_required: boat.skipperRequired,
-      documents_folder: getBoatDocumentsFolder(session.user.id, "pending"),
+      documents_folder: "",
       status: boat.status,
       bookings: boat.bookings,
       revenue: boat.revenue,
@@ -291,37 +331,45 @@ export const addOwnerBoat = async (boat: OwnerBoatMutation): Promise<OwnerBoat> 
     .single();
 
   if (error || !insertedBoat) {
-    throw new Error(error?.message || "Failed to add boat");
+    // Surface full Supabase error context so callers (and logs) can see
+    // which column/value caused database errors such as SQLSTATE 22007.
+    const details = (error as any)?.details || "";
+    const hint = (error as any)?.hint || "";
+    const code = (error as any)?.code || "";
+    const parts = [error?.message, details, hint, code && `code=${code}`].filter(Boolean);
+    throw new Error(parts.join(" | ") || "Failed to add boat");
   }
 
-  let primaryImagePath = boat.image;
+  const imageBoatKey = String(insertedBoat.id);
+  const documentsFolderPath = `${session.user.id}/${imageBoatKey}`;
+  const documentsFolder = `boat-documents/${documentsFolderPath}`;
+
+  let primaryImagePath = stripDataUrl(boat.image);
   if (boat.imageFile instanceof File) {
-    primaryImagePath = await uploadPrimaryBoatImage(session.user.id, insertedBoat.id, boat.imageFile);
+    primaryImagePath = await uploadBoatImageToStorage(boat.imageFile, session.user.id, imageBoatKey);
   }
-
-  const documentsFolder = getBoatDocumentsFolder(session.user.id, insertedBoat.id);
 
   await boatsTable
     .update({
       images: primaryImagePath,
       documents_folder: documentsFolder,
-      updated_at: new Date().toISOString(),
+      updated_at: getTodayIsoDate(),
     })
     .eq("id", insertedBoat.id)
     .eq("owner_id", session.user.id);
 
-  if (boat.features.length > 0) {
+  if (safeFeatures.length > 0) {
     await featuresTable.insert(
-      boat.features.map((feature) => ({
+      safeFeatures.map((feature) => ({
         boat_id: insertedBoat.id,
         feature,
       })),
     );
   }
 
-  if (boat.documents.length > 0) {
+  if (safeDocuments.length > 0) {
     const uploadedDocuments = await Promise.all(
-      boat.documents.map((document) => uploadBoatDocument(session.user.id, insertedBoat.id, document)),
+      safeDocuments.map((document) => uploadBoatDocument(documentsFolderPath, document)),
     );
 
     await documentsTable.insert(
@@ -339,8 +387,8 @@ export const addOwnerBoat = async (boat: OwnerBoatMutation): Promise<OwnerBoat> 
     id: insertedBoat.id,
     skipperRequired: boat.skipperRequired,
     documentsFolder,
-    image: resolveStorageImage(normalizeBoatImagePath(primaryImagePath), "boat-images", "https://via.placeholder.com/400x300?text=Boat"),
-    documents: boat.documents.map((document) => ({
+    image: resolveStorageImage(normalizeBoatImagePath(primaryImagePath), "boat-images", "/placeholder.svg"),
+    documents: safeDocuments.map((document) => ({
       ...document,
       filePath: document.filePath || document.dataUrl || "",
       dataUrl: document.dataUrl || document.filePath,
@@ -354,8 +402,29 @@ export const updateOwnerBoat = async (boatId: string, updates: OwnerBoatUpdateMu
   const featuresTable = (supabase as any).from("boat_features");
   const documentsTable = (supabase as any).from("boat_documents");
 
+  const { data: existingBoat, error: existingError } = await boatsTable
+    .select("name, created_at, documents_folder, images")
+    .eq("id", boatId)
+    .eq("owner_id", session.user.id)
+    .single();
+
+  if (existingError) {
+    throw new Error(existingError.message || "Failed to load boat for update");
+  }
+
+  let documentsFolderPath: string | null = null;
+  if (existingBoat?.documents_folder) {
+    const parsed = parseStorageReference(existingBoat.documents_folder, "boat-documents");
+    if (parsed) {
+      documentsFolderPath = parsed.path;
+    }
+  }
+  if (!documentsFolderPath) {
+    documentsFolderPath = `${session.user.id}/${boatId}`;
+  }
+
   const boatUpdates: Record<string, unknown> = {
-    updated_at: new Date().toISOString(),
+    updated_at: getTodayIsoDate(),
   };
 
   if (updates.name !== undefined) boatUpdates.name = updates.name;
@@ -370,12 +439,20 @@ export const updateOwnerBoat = async (boatId: string, updates: OwnerBoatUpdateMu
   if (updates.cancellationPolicy !== undefined) boatUpdates.cancellation_policy = updates.cancellationPolicy;
   if (updates.responseTime !== undefined) boatUpdates.response_time = updates.responseTime;
   if (updates.mapQuery !== undefined) boatUpdates.map_query = updates.mapQuery;
-  if (updates.unavailableDates !== undefined) boatUpdates.unavailable_dates = updates.unavailableDates;
+  if (updates.externalCalendarUrl !== undefined) boatUpdates.external_calendar_url = toNullableTrimmed(updates.externalCalendarUrl);
+  if (updates.flashSaleEnabled !== undefined) boatUpdates.flash_sale_enabled = updates.flashSaleEnabled;
+  if (updates.partyReady !== undefined) boatUpdates.party_ready = updates.partyReady;
+  if (updates.ticketMaxPeople !== undefined) boatUpdates.ticket_max_people = updates.ticketMaxPeople;
+  if (updates.ticketPricePerPerson !== undefined) boatUpdates.ticket_price_per_person = updates.ticketPricePerPerson;
+  // voucher fields removed
+  if (updates.unavailableDates !== undefined) {
+    boatUpdates.unavailable_dates = normalizeUnavailableDates(updates.unavailableDates);
+  }
   if (updates.minNoticeHours !== undefined) boatUpdates.min_notice_hours = updates.minNoticeHours;
   if (updates.capacity !== undefined) boatUpdates.capacity = updates.capacity;
   if (updates.pricePerDay !== undefined) boatUpdates.price_per_day = updates.pricePerDay;
   if (updates.rating !== undefined) boatUpdates.rating = updates.rating;
-  if (updates.image !== undefined) boatUpdates.images = updates.image;
+  if (updates.image !== undefined) boatUpdates.images = stripDataUrl(updates.image as string);
   if (updates.skipperRequired !== undefined) boatUpdates.skipper_required = updates.skipperRequired;
   if (updates.status !== undefined) boatUpdates.status = updates.status;
   if (updates.bookings !== undefined) boatUpdates.bookings = updates.bookings;
@@ -384,18 +461,26 @@ export const updateOwnerBoat = async (boatId: string, updates: OwnerBoatUpdateMu
   const { error } = await boatsTable.update(boatUpdates).eq("id", boatId).eq("owner_id", session.user.id);
 
   if (error) {
-    throw new Error(error.message || "Failed to update boat");
+    const details = (error as any)?.details || "";
+    const hint = (error as any)?.hint || "";
+    const code = (error as any)?.code || "";
+    const parts = [error.message, details, hint, code && `code=${code}`].filter(Boolean);
+    throw new Error(parts.join(" | ") || "Failed to update boat");
   }
 
   if (updates.imageFile instanceof File) {
-    const uploadedPath = await uploadPrimaryBoatImage(session.user.id, boatId, updates.imageFile);
+    const uploadedPath = await uploadBoatImageToStorage(updates.imageFile, session.user.id, boatId);
     const { error: imageUpdateError } = await boatsTable
-      .update({ images: uploadedPath, updated_at: new Date().toISOString() })
+      .update({ images: uploadedPath, updated_at: getTodayIsoDate() })
       .eq("id", boatId)
       .eq("owner_id", session.user.id);
 
     if (imageUpdateError) {
-      throw new Error(imageUpdateError.message || "Failed to save uploaded boat image");
+      const details = (imageUpdateError as any)?.details || "";
+      const hint = (imageUpdateError as any)?.hint || "";
+      const code = (imageUpdateError as any)?.code || "";
+      const parts = [imageUpdateError.message, details, hint, code && `code=${code}`].filter(Boolean);
+      throw new Error(parts.join(" | ") || "Failed to save uploaded boat image");
     }
   }
 
@@ -415,7 +500,7 @@ export const updateOwnerBoat = async (boatId: string, updates: OwnerBoatUpdateMu
     await documentsTable.delete().eq("boat_id", boatId);
     if (updates.documents.length > 0) {
       const uploadedDocuments = await Promise.all(
-        updates.documents.map((document) => uploadBoatDocument(session.user.id, boatId, document)),
+        updates.documents.map((document) => uploadBoatDocument(documentsFolderPath!, document)),
       );
 
       await documentsTable.insert(
@@ -428,7 +513,7 @@ export const updateOwnerBoat = async (boatId: string, updates: OwnerBoatUpdateMu
       );
 
       await boatsTable
-        .update({ documents_folder: getBoatDocumentsFolder(session.user.id, boatId), updated_at: new Date().toISOString() })
+        .update({ documents_folder: `boat-documents/${documentsFolderPath}`, updated_at: new Date().toISOString() })
         .eq("id", boatId)
         .eq("owner_id", session.user.id);
     }
@@ -486,30 +571,60 @@ export const getOwnerPackages = async (): Promise<OwnerPackage[]> => {
 
 const BOAT_EXTRA_MARKER = "[boat-extra]";
 
-export const listBoatExtras = async (boatId: string): Promise<BoatExtra[]> => {
+export const listBoatPackages = async (
+  boatId: string,
+): Promise<Array<{ id: string; name: string; duration: number; price: number; description: string }>> => {
   const session = await getSession();
   const packageBoatsTable = (supabase as any).from("owner_package_boats");
 
   const { data, error } = await packageBoatsTable
-    .select("package_id, owner_packages!inner(id, owner_id, name, price, description)")
+    .select("owner_packages(id, owner_id, name, duration_hours, price, description)")
     .eq("boat_id", boatId)
     .eq("owner_packages.owner_id", session.user.id);
+
+  if (error) {
+    throw new Error(error.message || "Failed to load boat packages");
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+
+  const corePackages = rows
+    .map((row: any) => row.owner_packages)
+    .filter((pkg: any) =>
+      pkg && (!pkg.description || !String(pkg.description).includes(BOAT_EXTRA_MARKER)),
+    )
+    .map((pkg: any) => ({
+      id: String(pkg.id),
+      name: String(pkg.name ?? "Package"),
+      duration: Number(pkg.duration_hours ?? 0),
+      price: Number(pkg.price ?? 0),
+      description: pkg.description ?? "",
+    }))
+    .filter((pkg) => pkg.duration > 0 && pkg.price > 0);
+
+  return corePackages;
+};
+
+export const listBoatExtras = async (boatId: string): Promise<BoatExtra[]> => {
+  const session = await getSession();
+  const extrasTable = (supabase as any).from("owner_extras");
+  const extraBoatsTable = (supabase as any).from("owner_extra_boats");
+
+  const { data, error } = await extraBoatsTable
+    .select("extra_id, owner_extras!inner(id, owner_id, name, price, description)")
+    .eq("boat_id", boatId)
+    .eq("owner_extras.owner_id", session.user.id);
 
   if (error) {
     throw new Error(error.message || "Failed to load boat extras");
   }
 
   return Array.isArray(data)
-    ? data
-        .filter((row: any) =>
-          typeof row.owner_packages?.description === "string" &&
-          row.owner_packages.description.includes(BOAT_EXTRA_MARKER),
-        )
-        .map((row: any) => ({
-          id: row.owner_packages.id,
-          name: row.owner_packages.name,
-          price: Number(row.owner_packages.price ?? 0),
-        }))
+    ? data.map((row: any) => ({
+        id: row.owner_extras.id,
+        name: row.owner_extras.name,
+        price: Number(row.owner_extras.price ?? 0),
+      }))
     : [];
 };
 
@@ -518,60 +633,130 @@ export const saveBoatExtras = async (
   extras: Array<{ name: string; price: number }>,
 ): Promise<void> => {
   const session = await getSession();
-  const packagesTable = (supabase as any).from("owner_packages");
-  const packageBoatsTable = (supabase as any).from("owner_package_boats");
+  const extrasTable = (supabase as any).from("owner_extras");
+  const extraBoatsTable = (supabase as any).from("owner_extra_boats");
 
   const sanitizedExtras = extras
     .map((extra) => ({
-      name: extra.name.trim(),
+      name: toTrimmed(extra.name),
       price: Number(extra.price) || 0,
     }))
     .filter((extra) => extra.name.length > 0);
 
-  const { data: existingLinks } = await packageBoatsTable
-    .select("package_id, owner_packages!inner(id, owner_id, description)")
-    .eq("boat_id", boatId)
-    .eq("owner_packages.owner_id", session.user.id);
+  // Clear existing extras for this boat
+  const { data: existingLinks } = await extraBoatsTable
+    .select("extra_id")
+    .eq("boat_id", boatId);
 
-  const existingExtraPackageIds = Array.isArray(existingLinks)
-    ? existingLinks
-        .filter((row: any) =>
-          typeof row.owner_packages?.description === "string" &&
-          row.owner_packages.description.includes(BOAT_EXTRA_MARKER),
-        )
-        .map((row: any) => row.package_id)
+  const existingExtraIds = Array.isArray(existingLinks)
+    ? existingLinks.map((row: any) => row.extra_id)
     : [];
 
-  if (existingExtraPackageIds.length > 0) {
-    await packageBoatsTable
+  if (existingExtraIds.length > 0) {
+    await extraBoatsTable
       .delete()
-      .eq("boat_id", boatId)
-      .in("package_id", existingExtraPackageIds);
+      .eq("boat_id", boatId);
 
-    await packagesTable
+    await extrasTable
       .delete()
       .eq("owner_id", session.user.id)
-      .in("id", existingExtraPackageIds);
+      .in("id", existingExtraIds);
   }
 
   if (sanitizedExtras.length === 0) {
     return;
   }
 
-  const { data: insertedPackages, error: insertPackagesError } = await packagesTable
+  const { data: insertedExtras, error: insertExtrasError } = await extrasTable
     .insert(
       sanitizedExtras.map((extra) => ({
         owner_id: session.user.id,
         name: extra.name,
-        duration_hours: 0,
         price: extra.price,
         description: `${BOAT_EXTRA_MARKER} Added from boat form`,
       })),
     )
     .select("id");
 
+  if (insertExtrasError || !Array.isArray(insertedExtras)) {
+    throw new Error(insertExtrasError?.message || "Failed to save boat extras");
+  }
+
+  const { error: linkError } = await extraBoatsTable.insert(
+    insertedExtras.map((extra: any) => ({
+      extra_id: extra.id,
+      boat_id: boatId,
+    })),
+  );
+
+  if (linkError) {
+    throw new Error(linkError.message || "Failed to link boat extras");
+  }
+};
+
+export const saveBoatPackages = async (
+  boatId: string,
+  packages: Array<{ name: string; duration: number; price: number; description?: string }>,
+): Promise<void> => {
+  const session = await getSession();
+  const packagesTable = (supabase as any).from("owner_packages");
+  const packageBoatsTable = (supabase as any).from("owner_package_boats");
+
+  const BOAT_EXTRA_MARKER = "[boat-extra]";
+
+  const sanitized = packages
+    .map((pkg) => ({
+      name: toTrimmed(pkg.name),
+      duration: Number(pkg.duration) || 0,
+      price: Number(pkg.price) || 0,
+      description: toTrimmed(pkg.description),
+    }))
+    .filter((pkg) => pkg.name.length > 0 && pkg.duration > 0 && pkg.price > 0);
+
+  const { data: existingLinks } = await packageBoatsTable
+    .select("package_id, owner_packages!inner(id, owner_id, description)")
+    .eq("boat_id", boatId)
+    .eq("owner_packages.owner_id", session.user.id);
+
+  const existingCorePackageIds = Array.isArray(existingLinks)
+    ? existingLinks
+        .filter((row: any) => {
+          const desc = row.owner_packages?.description;
+          return typeof desc !== "string" || !desc.includes(BOAT_EXTRA_MARKER);
+        })
+        .map((row: any) => row.package_id)
+    : [];
+
+  if (existingCorePackageIds.length > 0) {
+    await packageBoatsTable
+      .delete()
+      .eq("boat_id", boatId)
+      .in("package_id", existingCorePackageIds);
+
+    await packagesTable
+      .delete()
+      .eq("owner_id", session.user.id)
+      .in("id", existingCorePackageIds);
+  }
+
+  if (sanitized.length === 0) {
+    return;
+  }
+
+  const { data: insertedPackages, error: insertPackagesError } = await packagesTable
+    .insert(
+      sanitized.map((pkg) => ({
+        owner_id: session.user.id,
+        name: pkg.name,
+        duration_hours: pkg.duration,
+        price: pkg.price,
+        description: pkg.description,
+      })),
+    )
+    .select("id");
+
   if (insertPackagesError || !Array.isArray(insertedPackages)) {
-    throw new Error(insertPackagesError?.message || "Failed to save boat extras");
+    throw new Error(insertPackagesError?.message || "Failed to save boat packages");
   }
 
   const { error: linkError } = await packageBoatsTable.insert(
@@ -582,7 +767,7 @@ export const saveBoatExtras = async (
   );
 
   if (linkError) {
-    throw new Error(linkError.message || "Failed to link boat extras");
+    throw new Error(linkError.message || "Failed to link boat packages");
   }
 };
 
@@ -663,25 +848,120 @@ export const deleteOwnerPackage = async (id: string): Promise<boolean> => {
 };
 
 export const getOwnerCalendarEvents = async (boatId?: string): Promise<OwnerCalendarEvent[]> => {
-  // Calendar events feature is disabled; return an empty list.
-  return [];
+  if (!boatId) {
+    return [];
+  }
+
+  await getSession();
+
+  const { data, error } = await (supabase as any)
+    .from("calendar_events")
+    .select("id, boat_id, title, event_type, description, booking_id, start_time, end_time")
+    .eq("boat_id", boatId)
+    .order("start_time", { ascending: true });
+
+  if (error) {
+    throw new Error(error.message || "Failed to load calendar events");
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  return rows.map((row: any): OwnerCalendarEvent => ({
+    id: row.id,
+    boatId: row.boat_id,
+    // Derive a local YYYY-MM-DD date string from start_time
+    date: row.start_time ? new Date(row.start_time).toISOString().slice(0, 10) : "",
+    // Prefer structured event_type, fall back to title; default to "blocked" if unknown
+    type: ((typeof row.event_type === "string" && ["booked", "blocked", "maintenance"].includes(row.event_type))
+      ? row.event_type
+      : (typeof row.title === "string" && ["booked", "blocked", "maintenance"].includes(row.title)
+          ? row.title
+          : "blocked")) as OwnerCalendarEvent["type"],
+    guestName: row.description ?? undefined,
+    bookingId: row.booking_id ?? undefined,
+    startTime: row.start_time ?? null,
+    endTime: row.end_time ?? null,
+  }));
 };
 
 export const addCalendarEvent = async (event: Omit<OwnerCalendarEvent, "id">): Promise<OwnerCalendarEvent> => {
-  // Calendar events feature is disabled; simulate a no-op add and echo parameters.
+  const session = await getSession();
+
+  if (!event.boatId) {
+    throw new Error("Cannot create calendar event without a boatId");
+  }
+
+  const startIso = event.startTime
+    ? new Date(`${event.date}T${event.startTime}:00`).toISOString()
+    : new Date(`${event.date}T00:00:00`).toISOString();
+  const endIso = event.endTime
+    ? new Date(`${event.date}T${event.endTime}:00`).toISOString()
+    : null;
+
+  const { data, error } = await (supabase as any)
+    .from("calendar_events")
+    .insert({
+      user_id: session.user.id,
+      boat_id: event.boatId,
+      title: event.type,
+      event_type: event.type,
+      description: event.guestName ?? null,
+      location: null,
+      start_time: startIso,
+      end_time: endIso,
+      all_day: false,
+      timezone: null,
+      booking_id: event.bookingId ?? null,
+    })
+    .select("id, boat_id, title, booking_id, start_time, end_time")
+    .single();
+
+  if (error || !data) {
+    throw new Error(error?.message || "Failed to create calendar event");
+  }
+
   return {
-    id: "disabled-calendar-event",
-    boatId: event.boatId,
-    date: event.date,
-    type: event.type,
+    id: data.id,
+    boatId: data.boat_id,
+    date: data.start_time ? new Date(data.start_time).toISOString().slice(0, 10) : event.date,
+    type: (typeof data.title === "string" && ["booked", "blocked", "maintenance"].includes(data.title))
+      ? (data.title as OwnerCalendarEvent["type"])
+      : event.type,
     guestName: event.guestName,
-    bookingId: event.bookingId,
+    bookingId: data.booking_id ?? undefined,
+    startTime: data.start_time ?? null,
+    endTime: data.end_time ?? null,
   };
 };
 
 export const deleteCalendarEvent = async (id: string): Promise<boolean> => {
-  // Calendar events feature is disabled; treat delete as success.
-  void id;
+  const session = await getSession();
+
+  // Fetch event to enforce that only blocked/maintenance can be deleted here
+  const { data: row, error: fetchError } = await (supabase as any)
+    .from("calendar_events")
+    .select("id, event_type, user_id")
+    .eq("id", id)
+    .eq("user_id", session.user.id)
+    .single();
+
+  if (fetchError || !row) {
+    throw new Error(fetchError?.message || "Calendar event not found or not owned by this user");
+  }
+
+  if (row.event_type === "booked") {
+    throw new Error("Booked events are managed via bookings. Change or cancel the booking instead.");
+  }
+
+  const { error } = await (supabase as any)
+    .from("calendar_events")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", session.user.id);
+
+  if (error) {
+    throw new Error(error.message || "Failed to delete calendar event");
+  }
+
   return true;
 };
 
@@ -699,4 +979,59 @@ export const getOwnerStats = async (): Promise<OwnerStats> => {
     totalRevenue,
     averageRating,
   };
+};
+
+export const getOwnerBookings = async (): Promise<OwnerBooking[]> => {
+  const session = await getSession();
+
+  const { data, error } = await (supabase as any)
+    .from("bookings")
+    .select(
+      "id, boat_id, boat_name, customer_name, start_date, end_date, departure_time, end_time, guests, status, total_price, boats!inner(owner_id, name)",
+    )
+    .eq("boats.owner_id", session.user.id)
+    .order("start_date", { ascending: false })
+    .limit(80);
+
+  if (error) {
+    throw new Error(error.message || "Failed to load owner bookings");
+  }
+
+  const rows = Array.isArray(data) ? data : [];
+  return rows.map((row: any): OwnerBooking => ({
+    id: String(row.id),
+    boatName: String(row.boat_name || row.boats?.name || "Boat"),
+    customerName: String(row.customer_name || "Guest"),
+    date: String(row.start_date || ""),
+    departureTime: String(row.departure_time || ""),
+    guests: Number(row.guests ?? 0),
+    status: String(row.status || "confirmed"),
+    totalPrice: Number(row.total_price ?? 0),
+    endDate: row.end_date ? String(row.end_date) : null,
+    endTime: row.end_time ? String(row.end_time) : null,
+  }));
+};
+
+export const updateOwnerBookingStatus = async (bookingId: string, status: string): Promise<void> => {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const apiBaseUrl = (import.meta as any).env?.VITE_API_BASE_URL?.trim?.() ?? "";
+  const base = apiBaseUrl ? apiBaseUrl.replace(/\/$/, "") : "";
+  const url = `${base}/api/owner/bookings/${encodeURIComponent(bookingId)}/status`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+    },
+    body: JSON.stringify({ status }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Failed to update booking status");
+  }
 };

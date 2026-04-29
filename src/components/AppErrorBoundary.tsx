@@ -7,15 +7,17 @@ interface AppErrorBoundaryProps {
 
 interface AppErrorBoundaryState {
   hasError: boolean;
+  errorMessage?: string | null;
 }
 
 class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorBoundaryState> {
   state: AppErrorBoundaryState = {
     hasError: false,
+    errorMessage: null,
   };
 
-  static getDerivedStateFromError(): AppErrorBoundaryState {
-    return { hasError: true };
+  static getDerivedStateFromError(error: Error): AppErrorBoundaryState {
+    return { hasError: true, errorMessage: error?.message ?? "Unknown render error" };
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
@@ -44,6 +46,11 @@ class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorBoundary
             <p className="mt-2 text-sm text-muted-foreground">
               The page failed to render. Refresh to try again.
             </p>
+            {this.state.errorMessage ? (
+              <p className="mt-2 text-xs text-destructive/80 break-words">
+                Error details: {this.state.errorMessage}
+              </p>
+            ) : null}
             <button
               type="button"
               onClick={this.reloadPage}

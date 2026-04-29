@@ -12,16 +12,38 @@ interface BoatCardProps {
   image: string;
   images?: string[];
   name: string;
+  type?: string;
   capacity: number;
   location: string;
   pricePerDay: number;
+  ticketMaxPeople?: number;
+  ticketPricePerPerson?: number;
   rating: number;
   index: number;
   reviewCount?: number;
   owner?: BoatOwner;
+  partyReady?: boolean;
 }
 
-const BoatCard = ({ id, image, images, name, capacity, location, pricePerDay, rating, index, reviewCount, owner }: BoatCardProps) => {
+const formatEuroAmount = (value: number) => `€${value.toFixed(value % 1 === 0 ? 0 : 2)}`;
+
+const BoatCard = ({
+  id,
+  image,
+  images,
+  name,
+  type,
+  capacity,
+  location,
+  pricePerDay,
+  ticketMaxPeople,
+  ticketPricePerPerson,
+  rating,
+  index,
+  reviewCount,
+  owner,
+  partyReady,
+}: BoatCardProps) => {
   const { isFavorite, toggleFavorite } = useFavorites();
   const favorited = id ? isFavorite(id) : false;
   const galleryImages = useMemo(() => {
@@ -40,6 +62,23 @@ const BoatCard = ({ id, image, images, name, capacity, location, pricePerDay, ra
 
   const hasGalleryControls = galleryImages.length > 1;
   const displayedImage = galleryImages[activeImageIndex] ?? image;
+  const resolvedTicketMaxPeople = ticketMaxPeople && ticketMaxPeople > 0 ? ticketMaxPeople : capacity;
+  const resolvedTicketPricePerPerson =
+    Number.isFinite(ticketPricePerPerson) && (ticketPricePerPerson ?? 0) > 0
+      ? ticketPricePerPerson
+      : partyReady && capacity > 0
+        ? pricePerDay / capacity
+        : 0;
+  const partyTicketSummary =
+    partyReady && resolvedTicketMaxPeople > 0 && resolvedTicketPricePerPerson > 0
+      ? `${formatEuroAmount(resolvedTicketPricePerPerson)} / ${resolvedTicketMaxPeople} people`
+      : null;
+  const primaryPriceLabel = partyReady && resolvedTicketPricePerPerson > 0
+    ? `${formatEuroAmount(resolvedTicketPricePerPerson)} / ticket`
+    : `€${pricePerDay}`;
+  const secondaryPriceLabel = partyReady && resolvedTicketMaxPeople > 0
+    ? `up to ${resolvedTicketMaxPeople} guests`
+    : "starting";
 
   const showPreviousImage = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -96,8 +135,8 @@ const BoatCard = ({ id, image, images, name, capacity, location, pricePerDay, ra
           </>
         ) : null}
         <div className="absolute top-3 right-3 bg-card/90 backdrop-blur-sm rounded-full px-2.5 py-1 flex items-center gap-1">
-          <Star className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />
-          <span className="text-xs font-semibold text-foreground">{rating}</span>
+          <span className="text-lg font-heading font-bold text-foreground">{primaryPriceLabel}</span>
+          <span className="text-sm text-muted-foreground"> {secondaryPriceLabel}</span>
         </div>
         {id && (
           <button
@@ -121,6 +160,15 @@ const BoatCard = ({ id, image, images, name, capacity, location, pricePerDay, ra
       <div className="p-4 space-y-4">
         <div>
           <h3 className="font-heading font-semibold text-foreground text-lg mb-1">{name}</h3>
+          <div className="flex flex-wrap gap-2 mb-2">
+            {type ? <span className="text-[11px] rounded-full bg-aegean/10 px-2.5 py-1 text-aegean">{type}</span> : null}
+            {partyReady ? (
+              <span className="text-[11px] rounded-full bg-amber-100 px-2.5 py-1 text-amber-700">
+                {partyTicketSummary ?? "Party ready"}
+              </span>
+            ) : null}
+            {/* Voucher feature removed */}
+          </div>
           <div className="flex items-center gap-3 text-muted-foreground text-sm">
             <span className="flex items-center gap-1">
               <MapPin className="h-3.5 w-3.5" />
@@ -157,8 +205,11 @@ const BoatCard = ({ id, image, images, name, capacity, location, pricePerDay, ra
         
         <div className="flex items-center justify-between pt-2">
           <div>
-            <span className="text-lg font-heading font-bold text-foreground">€{pricePerDay}</span>
-            <span className="text-sm text-muted-foreground"> / day</span>
+            <span className="text-lg font-heading font-bold text-foreground">{primaryPriceLabel}</span>
+            <span className="text-sm text-muted-foreground"> {partyReady ? "ticket" : "/ day"}</span>
+            {partyTicketSummary ? (
+              <p className="text-xs text-muted-foreground mt-1">Tickets {partyTicketSummary}</p>
+            ) : null}
           </div>
           {id ? (
             <Link to={buildBoatDetailsPath({ id, name, location })} className="text-sm font-medium text-aegean hover:text-turquoise transition-colors">

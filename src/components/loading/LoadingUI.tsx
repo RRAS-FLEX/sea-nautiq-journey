@@ -107,6 +107,66 @@ export const BoatDetailsPageSkeleton = () => (
   </div>
 );
 
+export const ImpactStatsSkeleton = ({ count = 4 }: { count?: number }) => (
+  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-8">
+    {Array.from({ length: count }).map((_, index) => (
+      <div key={`impact-stat-skeleton-${index}`} className="rounded-2xl border border-primary-foreground/20 bg-primary-foreground/10 p-4 space-y-2">
+        <Skeleton className="h-4 w-4 bg-primary-foreground/30" />
+        <Skeleton className="h-8 w-16 bg-primary-foreground/30" />
+        <Skeleton className="h-3 w-20 bg-primary-foreground/30" />
+      </div>
+    ))}
+  </div>
+);
+
+export const BookingConfirmationSkeleton = () => (
+  <div className="space-y-5">
+    <Skeleton className="h-4 w-72" />
+    <div className="rounded-2xl border border-border bg-muted/20 p-4 space-y-3">
+      <div className="flex items-center justify-between gap-4">
+        <Skeleton className="h-4 w-10" />
+        <Skeleton className="h-4 w-24" />
+      </div>
+      <div className="flex items-center justify-between gap-4">
+        <Skeleton className="h-4 w-12" />
+        <Skeleton className="h-4 w-20" />
+      </div>
+      <div className="flex items-center justify-between gap-4">
+        <Skeleton className="h-4 w-20" />
+        <Skeleton className="h-4 w-28" />
+      </div>
+      <div className="flex items-center justify-between gap-4">
+        <Skeleton className="h-4 w-14" />
+        <Skeleton className="h-4 w-16" />
+      </div>
+    </div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="rounded-2xl border border-border p-4 bg-background space-y-2">
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="h-3 w-44" />
+      </div>
+      <div className="rounded-2xl border border-border p-4 bg-background space-y-2">
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="h-3 w-44" />
+      </div>
+    </div>
+    <div className="rounded-2xl border border-amber-400/40 bg-amber-50 p-4 space-y-2">
+      <Skeleton className="h-4 w-32" />
+      <Skeleton className="h-3 w-full" />
+      <Skeleton className="h-3 w-11/12" />
+    </div>
+    <div className="rounded-2xl border border-border bg-muted/20 p-4 space-y-2">
+      <Skeleton className="h-4 w-40" />
+      <Skeleton className="h-3 w-full" />
+      <Skeleton className="h-3 w-10/12" />
+    </div>
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <Skeleton className="h-11 w-full rounded-md" />
+      <Skeleton className="h-11 w-full rounded-md" />
+    </div>
+  </div>
+);
+
 export const BoatMapListSkeleton = ({ count = 5 }: { count?: number }) => (
   <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-3">
     {Array.from({ length: count }).map((_, index) => (

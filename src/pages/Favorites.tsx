@@ -53,8 +53,15 @@ const Favorites = () => {
 
         return (nextData as FavoriteBoat[]) ?? [];
       }, { retries: 2, initialDelayMs: 220 });
-
       setBoats(data);
+
+      // Clean up any favorite IDs that no longer have a corresponding boat in Supabase
+      const validIds = new Set(data.map((boat) => boat.id));
+      favoriteIds.forEach((id) => {
+        if (!validIds.has(id)) {
+          toggleFavorite(id);
+        }
+      });
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Unable to load favorites.");
     } finally {

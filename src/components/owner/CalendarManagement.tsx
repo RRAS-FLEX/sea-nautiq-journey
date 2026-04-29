@@ -13,10 +13,11 @@ import {
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { getOwnerBoats, addCalendarEvent, getOwnerCalendarEvents, deleteCalendarEvent, OwnerBoat, OwnerCalendarEvent } from "../../lib/owner-dashboard";
+import { supabase } from "../../lib/supabase";
 
 const CalendarManagement = () => {
   const [boats, setBoats] = useState<OwnerBoat[]>([]);
-  const [selectedBoatId, setSelectedBoatId] = useState<string>(boats[0]?.id || "");
+  const [selectedBoatId, setSelectedBoatId] = useState<string>("");
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("18:00");
   const [eventDate, setEventDate] = useState("");
@@ -24,18 +25,30 @@ const CalendarManagement = () => {
   const [guestName, setGuestName] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [events, setEvents] = useState<OwnerCalendarEvent[]>([]);
+  const [isLoadingBoats, setIsLoadingBoats] = useState(true);
+  const [isLoadingEvents, setIsLoadingEvents] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadBoats = async () => {
-      const nextBoats = await getOwnerBoats();
-      setBoats(nextBoats);
-      if (nextBoats[0] && !selectedBoatId) {
-        setSelectedBoatId(nextBoats[0].id);
+      try {
+        setIsLoadingBoats(true);
+        setLoadError(null);
+        const nextBoats = await getOwnerBoats();
+        setBoats(nextBoats);
+        if (nextBoats[0] && !selectedBoatId) {
+          setSelectedBoatId(nextBoats[0].id);
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load boats";
+        setLoadError(message);
+      } finally {
+        setIsLoadingBoats(false);
       }
     };
 
     loadBoats();
-  }, [selectedBoatId]);
+  }, []);
 
   useEffect(() => {
     if (!selectedBoatId) {
@@ -44,18 +57,60 @@ const CalendarManagement = () => {
     }
 
     const loadEvents = async () => {
-      const nextEvents = await getOwnerCalendarEvents(selectedBoatId);
-      setEvents(nextEvents);
+      try {
+        setIsLoadingEvents(true);
+        setLoadError(null);
+        const nextEvents = await getOwnerCalendarEvents(selectedBoatId);
+        setEvents(nextEvents);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load calendar events";
+        setLoadError(message);
+      } finally {
+        setIsLoadingEvents(false);
+      }
     };
 
     loadEvents();
+  }, [selectedBoatId]);
+
+  useEffect(() => {
+    if (!selectedBoatId) {
+      return;
+    }
+
+    const channel = supabase
+      .channel(`owner-calendar-${selectedBoatId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "calendar_events",
+          filter: `boat_id=eq.${selectedBoatId}`,
+        },
+        () => {
+          getOwnerCalendarEvents(selectedBoatId)
+            .then((nextEvents) => {
+              const sorted = [...nextEvents].sort((a, b) => a.date.localeCompare(b.date));
+              setEvents(sorted);
+            })
+            .catch(() => {
+              // Ignore realtime refresh errors; UI still has last known state.
+            });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [selectedBoatId]);
 
   const selectedBoat = boats.find((b) => b.id === selectedBoatId);
 
   const handleAddEvent = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!startTime || !endTime || !eventDate) return;
+    if (!selectedBoatId || !startTime || !endTime || !eventDate) return;
 
     if (startTime >= endTime) {
       alert("End time must be later than start time.");
@@ -90,7 +145,21 @@ const CalendarManagement = () => {
 
   return (
     <div className="space-y-6">
-      {boats.length === 0 ? (
+      {loadError ? (
+        <Card className="shadow-card">
+          <CardContent className="pt-6 text-center text-destructive">
+            {loadError}
+          </CardContent>
+        </Card>
+      ) : isLoadingBoats ? (
+        <Card className="shadow-card">
+          <CardContent className="pt-6 space-y-3">
+            <div className="h-5 w-48 rounded bg-muted animate-pulse" />
+            <div className="h-10 w-full rounded bg-muted/80 animate-pulse" />
+            <div className="h-24 w-full rounded bg-muted/70 animate-pulse" />
+          </CardContent>
+        </Card>
+      ) : boats.length === 0 ? (
         <Card className="shadow-card">
           <CardContent className="pt-6 text-center">
             <p className="text-muted-foreground">Add boats first to manage availability calendar.</p>
@@ -216,54 +285,75 @@ const CalendarManagement = () => {
                 </form>
               )}
 
-              {events.length > 0 ? (
+              {isLoadingEvents ? (
+                <div className="space-y-3">
+                  {Array.from({ length: 3 }).map((_, index) => (
+                    <div key={`event-skeleton-${index}`} className="rounded-xl border border-border p-4 space-y-2">
+                      <div className="h-4 w-40 rounded bg-muted animate-pulse" />
+                      <div className="h-4 w-28 rounded bg-muted/80 animate-pulse" />
+                    </div>
+                  ))}
+                </div>
+              ) : events.length > 0 ? (
                 <div className="space-y-3">
                   <p className="text-sm text-muted-foreground">
                     {events.length} event{events.length !== 1 ? "s" : ""} for {selectedBoat?.name}
                   </p>
-                  {events.map((event) => (
-                    <div
-                      key={event.id}
-                      className="rounded-xl border border-border p-4 flex items-center justify-between"
-                    >
-                      <div>
-                        <p className="font-semibold text-foreground">
-                          {new Date(event.date).toLocaleDateString("en-US", {
-                            weekday: "short",
-                            month: "short",
-                            day: "numeric",
-                          })}
-                        </p>
-                        <p className="text-sm text-muted-foreground">
-                          {event.startTime && event.endTime
-                            ? `${event.startTime.slice(0, 5)} - ${event.endTime.slice(0, 5)}`
-                            : "All day"}
-                        </p>
-                        {event.guestName && <p className="text-sm text-muted-foreground">Guest: {event.guestName}</p>}
+                  {events.map((event) => {
+                    const isDeletable = event.type === "blocked" || event.type === "maintenance";
+                    return (
+                      <div
+                        key={event.id}
+                        className="rounded-xl border border-border p-4 flex items-center justify-between"
+                      >
+                        <div>
+                          <p className="font-semibold text-foreground">
+                            {new Date(event.date).toLocaleDateString("en-US", {
+                              weekday: "short",
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {event.startTime && event.endTime
+                              ? `${event.startTime.slice(0, 5)} - ${event.endTime.slice(0, 5)}`
+                              : "All day"}
+                          </p>
+                          {event.guestName && (
+                            <p className="text-sm text-muted-foreground">Guest: {event.guestName}</p>
+                          )}
+                          {!isDeletable && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              Booked events are managed via bookings and cannot be deleted here.
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <Badge
+                            className={
+                              event.type === "booked"
+                                ? "bg-emerald-500"
+                                : event.type === "blocked"
+                                ? "bg-orange-500"
+                                : "bg-red-500"
+                            }
+                          >
+                            {event.type}
+                          </Badge>
+                          {isDeletable && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleDeleteEvent(event.id)}
+                              className="text-red-500 hover:text-red-600 hover:bg-red-50"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <Badge
-                          className={
-                            event.type === "booked"
-                              ? "bg-emerald-500"
-                              : event.type === "blocked"
-                              ? "bg-orange-500"
-                              : "bg-red-500"
-                          }
-                        >
-                          {event.type}
-                        </Badge>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => handleDeleteEvent(event.id)}
-                          className="text-red-500 hover:text-red-600 hover:bg-red-50"
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 <p className="text-center py-8 text-muted-foreground">

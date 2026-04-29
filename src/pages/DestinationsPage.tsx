@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useSEO } from "@/hooks/useSEO";
-import { Compass, LayoutGrid, List, MapPinned, Rows3, Ship, Sparkles } from "lucide-react";
+import { Compass, LayoutGrid, List, MapPinned, Rows3, Ship, Sparkles, Search } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DestinationGridSkeleton } from "@/components/loading/LoadingUI";
 import { getDestinations, type Destination } from "@/lib/destinations";
@@ -25,6 +26,8 @@ const DestinationsPage = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [viewMode, setViewMode] = useState<"compact" | "comfortable" | "detailed">("comfortable");
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const loadDestinations = async () => {
     try {
@@ -46,6 +49,25 @@ const DestinationsPage = () => {
   const totalBoats = useMemo(
     () => destinations.reduce((sum, destination) => sum + destination.boats, 0),
     [destinations],
+  );
+
+  const filteredDestinations = useMemo(
+    () => {
+      const normalized = searchQuery.trim().toLowerCase();
+      if (!normalized) return destinations;
+
+      return destinations.filter((destination) => {
+        const name = destination.name.toLowerCase();
+        const description = (destination.description ?? "").toLowerCase();
+        const bestFor = (destination.bestFor ?? "").toLowerCase();
+        return (
+          name.includes(normalized) ||
+          description.includes(normalized) ||
+          bestFor.includes(normalized)
+        );
+      });
+    },
+    [destinations, searchQuery],
   );
 
   return (
@@ -97,8 +119,33 @@ const DestinationsPage = () => {
 
         <section className="py-10 md:py-12">
           <div className="container mx-auto px-4 space-y-6">
-            <div className="flex justify-end">
-              <div className="flex items-center gap-1 rounded-lg border border-border p-1">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-2 md:max-w-xs w-full">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="gap-2 w-full md:w-auto justify-center md:justify-start"
+                  onClick={() => setIsSearchOpen((open) => !open)}
+                >
+                  <Search className="h-4 w-4 text-aegean" />
+                  <span className="text-xs md:text-sm">{tl("Search destinations", "Αναζήτηση προορισμών")}</span>
+                </Button>
+                {isSearchOpen && (
+                  <div className="flex-1">
+                    <div className="relative">
+                      <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+                      <Input
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        placeholder={tl("Search by island or vibe", "Αναζήτηση ανά νησί ή στιλ εκδρομής")}
+                        className="pl-9 text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1 rounded-lg border border-border p-1 self-end md:self-auto">
                 <Button
                   size="sm"
                   variant={viewMode === "compact" ? "default" : "ghost"}
@@ -146,7 +193,7 @@ const DestinationsPage = () => {
                   <Button variant="outline" onClick={loadDestinations}>{tl("Try again", "Δοκίμασε ξανά")}</Button>
                 </CardContent>
               </Card>
-            ) : destinations.map((destination) => (
+            ) : filteredDestinations.map((destination) => (
               <Card key={destination.id} id={destination.slug} className="overflow-hidden shadow-card-hover scroll-mt-24">
                 <div className="aspect-[16/9] overflow-hidden">
                   <img src={destination.image} alt={destination.name} className="w-full h-full object-cover" />

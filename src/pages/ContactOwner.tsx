@@ -77,7 +77,6 @@ const ContactOwner = () => {
               </CardHeader>
               <CardContent className="space-y-4 text-sm text-muted-foreground">
                 <p className="font-medium text-foreground">{boat?.owner.name ?? "Nautiq host team"}</p>
-                <p className="text-xs">{boat?.responseTime ?? "Usually replies fast"}</p>
                 <p className="flex items-center gap-2"><Mail className="h-4 w-4 text-aegean" />owner@nautiq.com</p>
                 <p className="flex items-center gap-2"><PhoneCall className="h-4 w-4 text-aegean" />{phoneNumber}</p>
                 <div className="grid grid-cols-1 gap-3">

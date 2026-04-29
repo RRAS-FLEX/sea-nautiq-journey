@@ -77,7 +77,7 @@ export const submitOwnerApplication = async (input: OwnerApplicationInput): Prom
 
   const { data: profile, error: profileError } = await (supabase as any)
     .from("users")
-    .select("id, name, email, is_owner")
+    .select("id, name, email, is_owner, owner_title, owner_bio")
     .eq("id", session.user.id)
     .single();
 
@@ -92,6 +92,49 @@ export const submitOwnerApplication = async (input: OwnerApplicationInput): Prom
   const existingApplication = await getMyOwnerApplication();
   if (existingApplication?.status === "pending") {
     throw new Error("You already have a pending owner application");
+  }
+
+  // Best-effort: hydrate owner profile fields from the rich onboarding form
+  // so company name & website surface on boats and fleet pages.
+  try {
+    const trimmedCompany = input.companyName.trim();
+    const hasExistingTitle = Boolean(profile.owner_title && String(profile.owner_title).trim());
+    const hasExistingBio = Boolean(profile.owner_bio && String(profile.owner_bio).trim());
+
+    const nextTitle = !hasExistingTitle && trimmedCompany ? trimmedCompany : null;
+
+    const bioLines: string[] = [];
+    if (!hasExistingBio) {
+      const area = input.operatingArea.trim();
+      const years = input.yearsExperience.trim();
+      const types = input.boatTypes.length > 0 ? input.boatTypes.join(", ") : "";
+      const fleet = input.boatCount.trim();
+      const season = input.operatingSeason.trim();
+      const website = input.website.trim();
+
+      if (trimmedCompany) bioLines.push(`Company: ${trimmedCompany}`);
+      if (area) bioLines.push(`Operating area: ${area}`);
+      if (years) bioLines.push(`Experience: ${years}`);
+      if (types) bioLines.push(`Boat types: ${types}`);
+      if (fleet) bioLines.push(`Boats planned to list: ${fleet}`);
+      if (season) bioLines.push(`Season: ${season}`);
+      if (website) bioLines.push(`Website / social: ${website}`);
+    }
+
+    const nextBio = !hasExistingBio && bioLines.length > 0 ? bioLines.join("\n") : null;
+
+    if (nextTitle || nextBio) {
+      await (supabase as any)
+        .from("users")
+        .update({
+          ...(nextTitle ? { owner_title: nextTitle } : {}),
+          ...(nextBio ? { owner_bio: nextBio } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", profile.id);
+    }
+  } catch {
+    // Profile enrichment is best-effort and should never block the application.
   }
 
   const notes = [

@@ -5,7 +5,7 @@ const NautiqLogo = ({ className = "" }: { className?: string }) => (
     <img
       src="/nautiplex_logo.png"
       alt="Nautiplex logo"
-      className="h-8 w-8 object-contain"
+      className="h-10 w-10 object-contain"
       loading="eager"
       decoding="async"
     />

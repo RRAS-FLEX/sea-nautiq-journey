@@ -11,12 +11,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { Label } from "./ui/label";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
 import {
   signInWithEmail,
   signInWithGoogle,
   signUpWithEmail,
 } from "@/lib/auth-hybrid";
 import type { AuthUser } from "@/lib/auth-hybrid";
+import { getRememberMePreference, setRememberMePreference } from "@/lib/auth-session";
 import { isGoogleClientIdUsable, sanitizeGoogleClientId } from "@/lib/google-oauth";
 
 interface AuthDialogProps {
@@ -36,6 +38,7 @@ const AuthDialog = ({ open, onOpenChange, onAuthenticated }: AuthDialogProps) =>
   const [signUpEmail, setSignUpEmail] = useState("");
   const [signUpPassword, setSignUpPassword] = useState("");
   const [signUpPasswordConfirm, setSignUpPasswordConfirm] = useState("");
+  const [rememberMe, setRememberMe] = useState(getRememberMePreference());
 
   const googleClientId = sanitizeGoogleClientId(import.meta.env.VITE_GOOGLE_CLIENT_ID);
   const hasUsableGoogleClientId = isGoogleClientIdUsable(googleClientId);
@@ -49,7 +52,7 @@ const AuthDialog = ({ open, onOpenChange, onAuthenticated }: AuthDialogProps) =>
 
   const handleGoogleSignIn = async () => {
     try {
-      await signInWithGoogle(window.location.href);
+      await signInWithGoogle(window.location.href, { rememberMe });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to complete Google sign in.");
     }
@@ -58,9 +61,10 @@ const AuthDialog = ({ open, onOpenChange, onAuthenticated }: AuthDialogProps) =>
   const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setErrorMessage("");
+    setRememberMePreference(rememberMe);
 
     try {
-      const user = await signInWithEmail(signInEmail, signInPassword);
+      const user = await signInWithEmail(signInEmail, signInPassword, { rememberMe });
       onAuthSuccess(user);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to sign in.");
@@ -76,8 +80,10 @@ const AuthDialog = ({ open, onOpenChange, onAuthenticated }: AuthDialogProps) =>
       return;
     }
 
+    setRememberMePreference(rememberMe);
+
     try {
-      const user = await signUpWithEmail(signUpName, signUpEmail, signUpPassword);
+      const user = await signUpWithEmail(signUpName, signUpEmail, signUpPassword, { rememberMe });
       onAuthSuccess(user);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to create account.");
@@ -143,6 +149,23 @@ const AuthDialog = ({ open, onOpenChange, onAuthenticated }: AuthDialogProps) =>
                   onChange={(event) => setSignInPassword(event.target.value)}
                   required
                 />
+              </div>
+
+              <div className="flex items-start gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2">
+                <Checkbox
+                  id="remember-me"
+                  checked={rememberMe}
+                  onCheckedChange={(checked) => setRememberMe(Boolean(checked))}
+                  className="mt-0.5"
+                />
+                <div className="space-y-1">
+                  <Label htmlFor="remember-me" className="cursor-pointer text-sm font-medium">
+                    Remember me for 30 days
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Keep this device signed in by storing the refresh token locally.
+                  </p>
+                </div>
               </div>
 
               {errorMessage && (

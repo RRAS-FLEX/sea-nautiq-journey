@@ -84,20 +84,51 @@ CREATE TABLE bookings (
   end_date DATE NOT NULL,
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'completed', 'cancelled')),
   total_price DECIMAL NOT NULL,
+  -- Dynamic commission fields (see supabase_dynamic_commission.sql for trigger logic)
+  fuel_included BOOLEAN NOT NULL DEFAULT FALSE,
+  duration_hours NUMERIC,
+  estimated_fuel_cost NUMERIC NOT NULL DEFAULT 0,
+  total_agency_commission NUMERIC NOT NULL DEFAULT 0,
+  base_rental_price NUMERIC,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Calendar events table
-CREATE TABLE calendar_events (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  boat_id UUID NOT NULL REFERENCES boats(id) ON DELETE CASCADE,
-  date DATE NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('booked', 'blocked', 'maintenance')),
-  guest_name TEXT,
-  booking_id UUID REFERENCES bookings(id) ON DELETE SET NULL,
-  created_at TIMESTAMP DEFAULT NOW()
+CREATE TABLE public.calendar_events (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  title text NOT NULL,
+  description text NULL,
+  location text NULL,
+  start_time timestamp with time zone NOT NULL,
+  end_time timestamp with time zone NULL,
+  all_day boolean NOT NULL DEFAULT FALSE,
+  timezone text NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  booking_id uuid NULL,
+  boat_id uuid NULL,
+  event_type public.calendar_event_type NOT NULL DEFAULT 'booked'::calendar_event_type,
+  CONSTRAINT calendar_events_pkey PRIMARY KEY (id),
+  CONSTRAINT calendar_events_boat_id_fkey FOREIGN KEY (boat_id) REFERENCES boats (id)
 );
+
+CREATE INDEX IF NOT EXISTS calendar_events_user_id_event_type_start_time_idx
+  ON public.calendar_events USING btree (user_id, event_type, start_time);
+
+CREATE INDEX IF NOT EXISTS calendar_events_user_id_start_time_idx
+  ON public.calendar_events USING btree (user_id, start_time);
+
+CREATE TRIGGER set_calendar_events_updated_at
+BEFORE UPDATE ON public.calendar_events
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_calendar_events_fill_boat_id
+BEFORE INSERT OR UPDATE OF booking_id, boat_id ON public.calendar_events
+FOR EACH ROW
+EXECUTE FUNCTION fn_calendar_events_fill_boat_id();
 
 -- Admin users table
 CREATE TABLE admin_users (
@@ -121,7 +152,6 @@ CREATE TABLE reviews (
 CREATE INDEX idx_boats_owner_id ON boats(owner_id);
 CREATE INDEX idx_bookings_boat_id ON bookings(boat_id);
 CREATE INDEX idx_bookings_customer_id ON bookings(customer_id);
-CREATE INDEX idx_calendar_events_boat_id ON calendar_events(boat_id);
 ```
 
 ## 4. Set Up Row-Level Security (RLS)

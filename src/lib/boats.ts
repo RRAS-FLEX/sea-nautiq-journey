@@ -27,6 +27,8 @@ export interface Boat {
 	location: string;
 	departureMarina: string;
 	pricePerDay: number;
+	ticketMaxPeople: number;
+	ticketPricePerPerson: number;
 	rating: number;
 	description: string;
 	amenities: string[];
@@ -38,6 +40,9 @@ export interface Boat {
 		minNoticeHours: number;
 	};
 	mapQuery: string;
+	externalCalendarUrl: string;
+	flashSaleEnabled: boolean;
+	partyReady: boolean;
 	skipperRequired: boolean;
 	bookings: number;
 	revenue: number;
@@ -55,6 +60,7 @@ type BoatUserRow = {
 	is_superhost?: boolean | null;
 	response_rate?: number | null;
 	created_at?: string | null;
+	stripe_payouts_ready?: boolean | null;
 };
 
 type BoatRow = {
@@ -76,9 +82,14 @@ type BoatRow = {
 	unavailable_dates?: string[] | null;
 	min_notice_hours?: number | null;
 	map_query?: string | null;
+	external_calendar_url?: string | null;
+	flash_sale_enabled?: boolean | null;
+	party_ready?: boolean | null;
 	skipper_required?: boolean | null;
 	bookings?: number | null;
 	revenue?: number | null;
+	ticket_max_people?: number | null;
+	ticket_price_per_person?: number | null;
 	status?: string | null;
 	images?: string[] | string | null;
 	image?: string | null;
@@ -252,7 +263,7 @@ const resolveBoatImages = (row: BoatRow): string[] => {
 	return imageCandidates.map((candidate) => resolveStorageImage(candidate, "boat-images", candidate));
 };
 
-const mapRow = (row: BoatRow): Boat => {
+const mapRow = (row: BoatRow, options?: { ignorePayoutsCheck?: boolean }): Boat => {
 	const resolvedImages = resolveBoatImages(row);
 	
 	// Use the aliased 'owner' relationship if available, fallback to 'users' for backward compatibility
@@ -270,12 +281,19 @@ const mapRow = (row: BoatRow): Boat => {
 	const ownerJoinedYear = ownerData?.created_at 
 		? new Date(ownerData.created_at).getFullYear() 
 		: new Date().getFullYear();
+	const ownerPayoutsReady = Boolean(ownerData?.stripe_payouts_ready);
+
+	// Hide boats from owners who have not completed Stripe payouts for
+	// public/visitor contexts. Owner previews can bypass this via options.
+	if (!ownerPayoutsReady && !options?.ignorePayoutsCheck) {
+		throw new Error("Owner payouts not ready");
+	}
 
 	return {
 	id: row.id,
 	publicSlug: buildBoatPublicSlug({ id: row.id, name: row.name, location: row.location }),
 	images: resolvedImages,
-	image: resolvedImages[0] ?? "https://via.placeholder.com/400x300?text=Boat",
+	image: resolvedImages[0] ?? "/placeholder.svg",
 	name: row.name,
 	type: row.type,
 	lengthMeters: Number(row.length_meters ?? 0),
@@ -286,6 +304,8 @@ const mapRow = (row: BoatRow): Boat => {
 	location: row.location,
 	departureMarina: row.departure_marina ?? row.location,
 	pricePerDay: Number(row.price_per_day),
+	ticketMaxPeople: Number(row.ticket_max_people ?? row.capacity ?? 0),
+	ticketPricePerPerson: Number(row.ticket_price_per_person ?? 0),
 	rating: Number(row.rating ?? 0),
 	description: row.description ?? "",
 	amenities: (row.boat_features ?? [])
@@ -308,6 +328,10 @@ const mapRow = (row: BoatRow): Boat => {
 		minNoticeHours: Number(row.min_notice_hours ?? 24),
 	},
 	mapQuery: row.map_query ?? `${row.location}, Greece`,
+	externalCalendarUrl: row.external_calendar_url ?? "",
+	flashSaleEnabled: Boolean(row.flash_sale_enabled),
+	partyReady: Boolean(row.party_ready),
+	// Voucher fields removed
 	skipperRequired: Boolean(row.skipper_required),
 	bookings: Number(row.bookings ?? 0),
 	revenue: Number(row.revenue ?? 0),
@@ -315,9 +339,9 @@ const mapRow = (row: BoatRow): Boat => {
 };
 
 const BOAT_SELECT =
-	"*, boat_features(feature), owner:owner_id(id, name, created_at, owner_title, owner_bio, owner_languages, is_superhost, response_rate)";
+	"*, boat_features(feature), owner:owner_id(id, name, created_at, owner_title, owner_bio, owner_languages, is_superhost, response_rate, stripe_payouts_ready)";
 const BOAT_SELECT_FALLBACK =
-	"id, name, type, location, capacity, price_per_day, rating, images, image, bookings, status, created_at, owner:owner_id(id, name, created_at), boat_features(feature)";
+	"id, name, type, location, capacity, price_per_day, rating, images, image, bookings, status, created_at, owner:owner_id(id, name, created_at, stripe_payouts_ready), boat_features(feature)";
 const BOAT_SELECT_MINIMAL =
 	"id, name, type, location, capacity, price_per_day, rating, images, image, skipper_required, bookings, revenue, status, created_at";
 
@@ -337,19 +361,44 @@ const fetchBoatsFromSupabase = async (includeInactive = false) => {
 	const primary = await queryBoats(BOAT_SELECT);
 	if (!primary.error) {
 		const rows = filterBoatRowsByVisibility((primary.data ?? []) as unknown as BoatRow[], includeInactive);
-		return rows.map(mapRow);
+		const visible: Boat[] = [];
+		for (const row of rows) {
+			try {
+				visible.push(mapRow(row));
+			} catch (error) {
+				// Skip boats that fail mapping (e.g. owner payouts not ready).
+				console.warn("Skipping boat row due to mapping error", error);
+			}
+		}
+		return visible;
 	}
 
 	const relationFallback = await queryBoats(BOAT_SELECT_FALLBACK);
 	if (!relationFallback.error) {
 		const rows = filterBoatRowsByVisibility((relationFallback.data ?? []) as unknown as BoatRow[], includeInactive);
-		return rows.map(mapRow);
+		const visible: Boat[] = [];
+		for (const row of rows) {
+			try {
+				visible.push(mapRow(row));
+			} catch (error) {
+				console.warn("Skipping boat row due to mapping error", error);
+			}
+		}
+		return visible;
 	}
 
 	const minimal = await queryBoats(BOAT_SELECT_MINIMAL);
 	if (!minimal.error) {
 		const rows = filterBoatRowsByVisibility((minimal.data ?? []) as unknown as BoatRow[], includeInactive);
-		return rows.map(mapRow);
+		const visible: Boat[] = [];
+		for (const row of rows) {
+			try {
+				visible.push(mapRow(row));
+			} catch (error) {
+				console.warn("Skipping boat row due to mapping error", error);
+			}
+		}
+		return visible;
 	}
 
 	const minimalWithoutStatus = await supabase
@@ -358,7 +407,15 @@ const fetchBoatsFromSupabase = async (includeInactive = false) => {
 
 	if (!minimalWithoutStatus.error) {
 		const rows = filterBoatRowsByVisibility((minimalWithoutStatus.data ?? []) as unknown as BoatRow[], includeInactive);
-		return rows.map(mapRow);
+		const visible: Boat[] = [];
+		for (const row of rows) {
+			try {
+				visible.push(mapRow(row));
+			} catch (error) {
+				console.warn("Skipping boat row due to mapping error", error);
+			}
+		}
+		return visible;
 	}
 
 	throw new Error(
@@ -443,6 +500,45 @@ export const getBoatById = async (id: string): Promise<Boat | null> => {
 
 	if (minimalError || !minimalData) return null;
 	return mapRow(minimalData as unknown as BoatRow);
+};
+
+// Owner-only helper: fetch a boat by ID even if Stripe payouts are not ready.
+// Used for owner dashboard previews so owners can view their boat page
+// before connecting payouts or while adjusting settings.
+export const getBoatByIdForOwner = async (id: string): Promise<Boat | null> => {
+	const normalizedId = String(id ?? "").trim();
+	if (!UUID_REGEX.test(normalizedId)) {
+		return null;
+	}
+
+	const { data, error } = await supabase
+		.from("boats")
+		.select(BOAT_SELECT)
+		.eq("id", normalizedId)
+		.maybeSingle();
+
+	if (!error && data) {
+		return mapRow(data as unknown as BoatRow, { ignorePayoutsCheck: true });
+	}
+
+	const { data: fallbackData, error: fallbackError } = await supabase
+		.from("boats")
+		.select(BOAT_SELECT_FALLBACK)
+		.eq("id", normalizedId)
+		.maybeSingle();
+
+	if (!fallbackError && fallbackData) {
+		return mapRow(fallbackData as unknown as BoatRow, { ignorePayoutsCheck: true });
+	}
+
+	const { data: minimalData, error: minimalError } = await supabase
+		.from("boats")
+		.select(BOAT_SELECT_MINIMAL)
+		.eq("id", normalizedId)
+		.maybeSingle();
+
+	if (minimalError || !minimalData) return null;
+	return mapRow(minimalData as unknown as BoatRow, { ignorePayoutsCheck: true });
 };
 
 export const getBoatByPublicReference = async (reference: string): Promise<Boat | null> => {

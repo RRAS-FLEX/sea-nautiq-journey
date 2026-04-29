@@ -35,7 +35,7 @@ export const parseStorageReference = (
   value: string | null | undefined,
   defaultBucket: string,
 ): { bucket: string; path: string } | null => {
-  const trimmed = value?.trim() ?? "";
+	const trimmed = String(value ?? "").trim();
   if (!trimmed || ABSOLUTE_URL.test(trimmed) || DATA_URL.test(trimmed)) {
     return null;
   }
@@ -68,7 +68,7 @@ export const resolveStorageImage = (
   defaultBucket: string,
   fallback = "",
 ): string => {
-  const trimmed = value?.trim() ?? "";
+	const trimmed = String(value ?? "").trim();
   if (!trimmed) {
     return fallback;
   }

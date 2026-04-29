@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { resolveBoatVoucherPricing } from "./booking-pricing";
 
 export type BookingPaymentMethod = "stripe" | "manual";
 
@@ -18,6 +19,12 @@ export interface BookingRecord {
   totalPrice: number;
   paymentMethod: BookingPaymentMethod;
   paymentPlan: "deposit" | "full";
+  voucherCode?: string;
+  flashSaleEnabled?: boolean;
+  // voucher fields removed
+  partyTicketCode?: string;
+  partyTicketCount?: number;
+  partyTicketStatus?: "issued" | "void";
   amountDueNow: number;
   depositAmount: number;
   platformCommission: number;
@@ -68,6 +75,10 @@ export interface ConfirmBookingInput {
   depositAmount: number;
   platformCommission: number;
   ownerPayout: number;
+  voucherCode?: string;
+  flashSaleEnabled?: boolean;
+  // voucher fields removed
+  partyReady?: boolean;
   extras: string[];
   notes: string;
   queueCustomerEmail: boolean;
@@ -91,8 +102,72 @@ export interface DepartureRecommendation {
   reasons: string[];
 }
 
+type DayBookingRow = {
+  departure_time?: string | null;
+  end_time?: string | null;
+  package_hours?: number | null;
+};
+
+type DayCalendarEventRow = {
+  start_time?: string | null;
+  end_time?: string | null;
+  all_day?: boolean | null;
+};
+
+type ConfirmedBookingRow = {
+  id?: string | null;
+  departure_time?: string | null;
+  end_time?: string | null;
+  package_hours?: number | null;
+  created_at?: string | null;
+};
+
+type CreatedBookingRow = {
+  id: string;
+  created_at: string;
+  boat_id: string;
+  boat_name?: string | null;
+  owner_name?: string | null;
+  customer_name?: string | null;
+  customer_email?: string | null;
+  package_label?: string | null;
+  guests?: number | null;
+  start_date: string;
+  departure_time?: string | null;
+  departure_marina?: string | null;
+  total_price?: number | null;
+  payment_method?: string | null;
+  payment_plan?: string | null;
+  amount_due_now?: number | null;
+  deposit_amount?: number | null;
+  platform_commission?: number | null;
+  owner_payout?: number | null;
+  party_ticket_code?: string | null;
+  party_ticket_count?: number | null;
+  party_ticket_status?: string | null;
+  extras?: unknown;
+  notes?: string | null;
+};
+
+type IdRow = {
+  id?: string | null;
+};
+
+type SupabaseErrorLike = {
+  message?: string;
+  details?: string;
+  hint?: string;
+  code?: string;
+};
+
 const OPERATING_START_MINUTES = 7 * 60;
 const OPERATING_END_MINUTES = 20 * 60;
+
+const generatePartyTicketCode = () => {
+  const stamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `PRTY-${stamp}-${random}`;
+};
 
 const addHoursToTime = (timeValue: string, hoursToAdd: number) => {
   const [hoursPart, minutesPart] = String(timeValue).split(":");
@@ -190,9 +265,18 @@ const isInsideOperatingWindow = (startTime: string, endTime: string) => {
   return startMinutes >= OPERATING_START_MINUTES && endMinutes <= OPERATING_END_MINUTES;
 };
 
+const isoToTimeString = (value: string | null | undefined): string | null => {
+  if (!value) return null;
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return null;
+  const hours = String(dt.getHours()).padStart(2, "0");
+  const minutes = String(dt.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
+};
+
 const loadDayBookedSlots = async (boatId: string, date: string): Promise<DayBookingSlot[]> => {
   // Confirmed bookings for this day
-  const { data: bookingRows, error: bookingsError } = await (supabase as any)
+  const { data: bookingRows, error: bookingsError } = await supabase
     .from("bookings")
     .select("departure_time, end_time, package_hours, status")
     .eq("boat_id", boatId)
@@ -202,10 +286,11 @@ const loadDayBookedSlots = async (boatId: string, date: string): Promise<DayBook
   const slotsFromBookings: DayBookingSlot[] =
     !bookingsError && Array.isArray(bookingRows)
       ? bookingRows
-          .map((row: any) => {
-            const departureTime = String(row.departure_time ?? "");
-            const fallbackEnd = addHoursWithoutOvernightWrap(departureTime, Number(row.package_hours ?? 0));
-            const endTime = String(row.end_time ?? fallbackEnd ?? "");
+          .map((row) => {
+            const bookingRow = row as DayBookingRow;
+            const departureTime = String(bookingRow.departure_time ?? "");
+            const fallbackEnd = addHoursWithoutOvernightWrap(departureTime, Number(bookingRow.package_hours ?? 0));
+            const endTime = String(bookingRow.end_time ?? fallbackEnd ?? "");
             if (!isValidTime(departureTime) || !isValidTime(endTime)) {
               return null;
             }
@@ -215,8 +300,45 @@ const loadDayBookedSlots = async (boatId: string, date: string): Promise<DayBook
           .filter((slot: DayBookingSlot | null): slot is DayBookingSlot => Boolean(slot))
       : [];
 
-  // Temporarily ignore calendar_events; availability is driven solely by confirmed bookings.
-  return slotsFromBookings;
+  // Blocked / maintenance events from calendar_events for this day
+  const dayStartIso = `${date}T00:00:00.000Z`;
+  const nextDay = new Date(`${date}T00:00:00.000Z`);
+  nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+  const nextDayIso = nextDay.toISOString();
+
+  const { data: calendarRows, error: calendarError } = await supabase
+    .from("calendar_events")
+    .select("start_time, end_time, all_day")
+    .eq("boat_id", boatId)
+    .gte("start_time", dayStartIso)
+    .lt("start_time", nextDayIso);
+
+  const slotsFromCalendar: DayBookingSlot[] =
+    !calendarError && Array.isArray(calendarRows)
+      ? calendarRows
+          .map((row) => {
+            const calendarRow = row as DayCalendarEventRow;
+            const isAllDay = Boolean(calendarRow.all_day);
+            const startTime = isoToTimeString(calendarRow.start_time);
+            const endTime = isAllDay
+              ? "20:00"
+              : isoToTimeString(calendarRow.end_time ?? calendarRow.start_time);
+
+            if (!startTime || !endTime || !isValidTime(startTime) || !isValidTime(endTime)) {
+              return null;
+            }
+
+            return { departureTime: startTime, endTime } satisfies DayBookingSlot;
+          })
+          .filter((slot: DayBookingSlot | null): slot is DayBookingSlot => Boolean(slot))
+      : [];
+
+  return [...slotsFromBookings, ...slotsFromCalendar];
+};
+
+export const hasAnyDayOccupancy = async (boatId: string, date: string): Promise<boolean> => {
+  const slots = await loadDayBookedSlots(boatId, date);
+  return slots.length > 0;
 };
 
 const isSlotAvailable = (bookedSlots: DayBookingSlot[], departureTime: string, packageHours: number) => {
@@ -275,7 +397,7 @@ const shouldCancelNewlyCreatedOverlap = async (
   departureTime: string,
   endTime: string,
 ) => {
-  const { data, error } = await (supabase as any)
+  const { data, error } = await supabase
     .from("bookings")
     .select("id, departure_time, end_time, package_hours, created_at, status")
     .eq("boat_id", boatId)
@@ -288,18 +410,19 @@ const shouldCancelNewlyCreatedOverlap = async (
   }
 
   const activeSlots = data
-    .map((row: any) => {
-      const rowDepartureTime = String(row.departure_time ?? "");
-      const fallbackEnd = addHoursWithoutOvernightWrap(rowDepartureTime, Number(row.package_hours ?? 0));
-      const rowEndTime = String(row.end_time ?? fallbackEnd ?? "");
+    .map((row) => {
+      const bookingRow = row as ConfirmedBookingRow;
+      const rowDepartureTime = String(bookingRow.departure_time ?? "");
+      const fallbackEnd = addHoursWithoutOvernightWrap(rowDepartureTime, Number(bookingRow.package_hours ?? 0));
+      const rowEndTime = String(bookingRow.end_time ?? fallbackEnd ?? "");
 
       if (!isValidTime(rowDepartureTime) || !isValidTime(rowEndTime)) {
         return null;
       }
 
       return {
-        id: String(row.id ?? ""),
-        createdAt: String(row.created_at ?? ""),
+        id: String(bookingRow.id ?? ""),
+        createdAt: String(bookingRow.created_at ?? ""),
         departureTime: rowDepartureTime,
         endTime: rowEndTime,
       };
@@ -436,7 +559,20 @@ export const confirmBookingWorkflow = async (input: ConfirmBookingInput): Promis
     data: { session },
   } = await supabase.auth.getSession();
 
-  const { data: bookingRow, error: bookingError } = await (supabase as any)
+  const pricing = resolveBoatVoucherPricing({
+    baseTotalPrice: input.totalPrice,
+    bookingDate: input.date,
+    departureTime: input.departureTime,
+    flashSaleEnabled: Boolean(input.flashSaleEnabled),
+    paymentPlan: input.paymentPlan,
+  });
+
+  const isPartyBooking = Boolean(input.partyReady);
+  const partyTicketCode = isPartyBooking ? generatePartyTicketCode() : null;
+  const partyTicketCount = isPartyBooking ? Math.max(1, Number(input.guests) || 1) : 0;
+  const partyTicketStatus = isPartyBooking ? "issued" : null;
+
+  const { data: bookingRowRaw, error: bookingError } = await supabase
     .from("bookings")
     .insert({
       boat_id: input.boatId,
@@ -454,13 +590,17 @@ export const confirmBookingWorkflow = async (input: ConfirmBookingInput): Promis
       end_time: bookingEndTime,
       package_hours: input.packageHours,
       departure_marina: input.departureMarina,
-      total_price: input.totalPrice,
+      total_price: pricing.discountedTotal,
       payment_method: input.paymentMethod,
       payment_plan: input.paymentPlan,
-      amount_due_now: input.amountDueNow,
-      deposit_amount: input.depositAmount,
-      platform_commission: input.platformCommission,
-      owner_payout: input.ownerPayout,
+      amount_due_now: pricing.amountDueNow,
+      deposit_amount: pricing.depositAmount,
+      platform_commission: Math.round(pricing.amountDueNow * 0.15),
+      owner_payout: Math.max(pricing.amountDueNow - Math.round(pricing.amountDueNow * 0.15), 0),
+      // voucher columns removed
+      party_ticket_code: partyTicketCode,
+      party_ticket_count: partyTicketCount,
+      party_ticket_status: partyTicketStatus,
       extras: input.extras,
       notes: input.notes,
       status: "confirmed",
@@ -468,8 +608,15 @@ export const confirmBookingWorkflow = async (input: ConfirmBookingInput): Promis
     .select()
     .single();
 
+  const bookingRow = bookingRowRaw as CreatedBookingRow | null;
+
   if (bookingError || !bookingRow) {
-    throw new Error(bookingError?.message || "Failed to confirm booking");
+    const errorInfo = (bookingError ?? null) as SupabaseErrorLike | null;
+    const details = errorInfo?.details || "";
+    const hint = errorInfo?.hint || "";
+    const code = errorInfo?.code || "";
+    const parts = [errorInfo?.message, details, hint, code && `code=${code}`].filter(Boolean);
+    throw new Error(parts.join(" | ") || "Failed to confirm booking");
   }
 
   const shouldCancelForOverlap = await shouldCancelNewlyCreatedOverlap(
@@ -481,7 +628,7 @@ export const confirmBookingWorkflow = async (input: ConfirmBookingInput): Promis
   );
 
   if (shouldCancelForOverlap) {
-    await (supabase as any)
+    await supabase
       .from("bookings")
       .update({ status: "cancelled" })
       .eq("id", bookingRow.id);
@@ -507,10 +654,14 @@ export const confirmBookingWorkflow = async (input: ConfirmBookingInput): Promis
     totalPrice: Number(bookingRow.total_price ?? input.totalPrice),
     paymentMethod: (bookingRow.payment_method ?? input.paymentMethod) as BookingPaymentMethod,
     paymentPlan: (bookingRow.payment_plan ?? input.paymentPlan) as "deposit" | "full",
-    amountDueNow: Number(bookingRow.amount_due_now ?? input.amountDueNow),
-    depositAmount: Number(bookingRow.deposit_amount ?? input.depositAmount),
-    platformCommission: Number(bookingRow.platform_commission ?? input.platformCommission),
-    ownerPayout: Number(bookingRow.owner_payout ?? input.ownerPayout),
+    amountDueNow: Number(bookingRow.amount_due_now ?? pricing.amountDueNow),
+    depositAmount: Number(bookingRow.deposit_amount ?? pricing.depositAmount),
+    platformCommission: Number(bookingRow.platform_commission ?? Math.round(pricing.amountDueNow * 0.15)),
+    ownerPayout: Number(bookingRow.owner_payout ?? Math.max(pricing.amountDueNow - Math.round(pricing.amountDueNow * 0.15), 0)),
+    // voucher removed
+    partyTicketCode: bookingRow.party_ticket_code ?? partyTicketCode ?? undefined,
+    partyTicketCount: Number(bookingRow.party_ticket_count ?? partyTicketCount),
+    partyTicketStatus: (bookingRow.party_ticket_status as "issued" | "void" | null) ?? (partyTicketStatus as "issued" | null) ?? undefined,
     extras: Array.isArray(bookingRow.extras) ? bookingRow.extras : input.extras,
     notes: bookingRow.notes ?? input.notes,
     status: "confirmed",
@@ -520,9 +671,9 @@ export const confirmBookingWorkflow = async (input: ConfirmBookingInput): Promis
     id: "",
     bookingId: booking.id,
     ownerName: input.ownerName,
-    ownerEmail: "owner@nautiq.com",
-    subject: `New booking confirmed for ${input.boatName}`,
-    message: `${input.customerName} confirmed ${input.packageLabel} on ${input.date} at ${input.departureTime} for ${input.guests} guests. Total: €${input.totalPrice}. Due now: €${input.amountDueNow}. Owner payout: €${input.ownerPayout}.`,
+    ownerEmail: "owner@nautiplex.com",
+    subject: `New Nautiplex booking for ${input.boatName}`,
+    message: `${input.customerName} confirmed ${input.packageLabel} on ${input.date} at ${input.departureTime} for ${input.guests} guests. Total: €${pricing.discountedTotal}. Due now: €${pricing.amountDueNow}. Owner payout: €${Math.max(pricing.amountDueNow - Math.round(pricing.amountDueNow * 0.15), 0)}.`,
     createdAt: timestamp,
     status: "queued",
   };
@@ -547,21 +698,27 @@ export const confirmBookingWorkflow = async (input: ConfirmBookingInput): Promis
           `Guests: ${input.guests}`,
           `Add-ons: ${extrasLine}`,
           `Special requests: ${notesLine}`,
-          `Total confirmed: €${input.totalPrice}`,
-          `Paid now (${input.paymentPlan === "deposit" ? "30% deposit" : "full"}): €${input.amountDueNow}`,
+          `Total confirmed: €${pricing.discountedTotal}`,
+          `Paid now (${input.paymentPlan === "deposit" ? "30% deposit" : "full"}): €${pricing.amountDueNow}`,
+          ...(isPartyBooking
+            ? [
+                `Party ticket code: ${partyTicketCode}`,
+                `Tickets issued: ${partyTicketCount}`,
+              ]
+            : []),
           "",
           `Host: ${input.ownerName}`,
           "We have also notified the owner and queued your confirmation email.",
           "",
           "See you on the water,",
-          "Nautiq",
+          "Nautiplex",
         ].join("\n"),
         createdAt: timestamp,
         status: "queued",
       }
     : null;
 
-  const { data: notificationRow } = await (supabase as any)
+  const { data: notificationRowRaw } = await supabase
     .from("owner_notifications")
     .insert({
       booking_id: booking.id,
@@ -574,12 +731,14 @@ export const confirmBookingWorkflow = async (input: ConfirmBookingInput): Promis
     .select()
     .single();
 
-  if (notificationRow) {
+  const notificationRow = notificationRowRaw as IdRow | null;
+
+  if (notificationRow?.id) {
     ownerNotification.id = notificationRow.id;
   }
 
   if (customerEmail) {
-    const { data: customerEmailRow } = await (supabase as any)
+    const { data: customerEmailRowRaw } = await supabase
       .from("customer_emails")
       .insert({
         booking_id: booking.id,
@@ -592,7 +751,9 @@ export const confirmBookingWorkflow = async (input: ConfirmBookingInput): Promis
       .select()
       .single();
 
-    if (customerEmailRow) {
+    const customerEmailRow = customerEmailRowRaw as IdRow | null;
+
+    if (customerEmailRow?.id) {
       customerEmail.id = customerEmailRow.id;
     }
   }

@@ -165,6 +165,139 @@ const { data, error } = await supabase.storage
   .upload(`${boatId}/main.jpg`, file);
 ```
 
+## Owner Badges Migration
+
+This project includes an **owner performance badges** system that can power
+customer-facing badges on boat listings (e.g. "Fast Responder", "Zero-Cancel").
+
+All SQL for this lives in `supabase_test/supabase_owner_badges.sql` and is
+designed to be **rerunnable** in Supabase.
+
+### What the migration adds
+
+1. `badges` table — catalog of badge definitions (`name`, `icon_slug`, `description`)
+2. `boat_owner_badges` table — link table from `users.id` (owners) to `badges.id`
+3. `owner_performance_metrics` view — aggregates bookings + reviews per owner
+4. `fn_refresh_owner_badges()` — recomputes badges for all owners based on metrics
+5. `trg_refresh_owner_badges_after_change` + triggers on `bookings` and `reviews`
+6. `boat_listing_owner_badges` view — exposes, per `boat_id`, a JSON array of
+    badges for that boat's owner, safe for public listings.
+
+### How to apply the badge SQL
+
+1. Open `supabase_test/supabase_owner_badges.sql` in your editor.
+2. Copy its full contents.
+3. In Supabase Dashboard, go to **SQL Editor → New query**.
+4. Paste the SQL and run it once.
+
+The script is idempotent: it uses `IF NOT EXISTS` and `CREATE OR REPLACE` so
+you can re-run it safely when you tweak badge logic.
+
+### Row-Level Security for badges
+
+The migration enables RLS and adds these policies:
+
+- `badges`: `"Public can read badges"` → anyone can read the badge catalog.
+- `boat_owner_badges`: `"Owners can read their badges"` → owners can read
+   their own assignments using `auth.uid()`.
+- `boat_owner_badges`: `"Public can read owner badges"` → anonymous/public
+   clients can read badge assignments, which is needed for listings.
+
+Because of the public read policy, you can safely query `boat_listing_owner_badges`
+from the frontend using the anon key.
+
+### How listings consume badges
+
+The `boat_listing_owner_badges` view returns rows like:
+
+```sql
+SELECT * FROM boat_listing_owner_badges WHERE boat_id = :boat_id;
+```
+
+Each row contains:
+
+- `boat_id` — the public `boats.id`
+- `owner_badges` — `json_agg` of objects
+   `{ name: text, icon_slug: text }` for that owner
+
+Frontend pattern (pseudocode):
+
+1. Query boats as usual from `boats` (or existing view/API).
+2. For each boat, either:
+    - Join `boat_listing_owner_badges` server-side (preferred for SSR/edge), or
+    - Make a client-side Supabase query filtering by `boat_id`.
+3. Render one or more badge pills/icons using `badge.name` + `badge.icon_slug`.
+
+Once this is wired into the UI, high-performing owners automatically earn and
+lose badges over time as bookings and reviews change.
+
+## Calendar Events boat_id Backfill & Trigger
+
+To make sure `calendar_events.boat_id` is always populated when a
+`booking_id` is present, there is a helper SQL script:
+
+- `supabase_test/supabase_calendar_events_fill_boat_id.sql`
+
+Run this once in Supabase **SQL Editor**:
+
+1. Open the file in your editor and copy its contents.
+2. In Supabase Dashboard, go to **SQL Editor → New query**.
+3. Paste and run it.
+
+This will:
+
+- Backfill any existing `calendar_events` rows that have `booking_id` set
+   but `boat_id` NULL, copying `boat_id` from the related booking.
+- Create a trigger so that future inserts/updates on `calendar_events`
+   automatically fill `boat_id` from `bookings` whenever `booking_id` is set
+   and `boat_id` is missing.
+
+## Calendar Events RLS Policies
+
+Booking calendars and owner availability tools need to read
+`calendar_events` to show blocked/maintenance dates.
+
+Use the helper script:
+
+- `supabase_test/supabase_calendar_events_policies.sql`
+
+Run this once in Supabase **SQL Editor**:
+
+1. Open the file in your editor and copy its contents.
+2. In Supabase Dashboard, go to **SQL Editor → New query**.
+3. Paste and run it.
+
+This will:
+
+- Enable RLS on `public.calendar_events` (if not already enabled).
+- Allow public/anon clients to `SELECT` events, which is needed so the
+   booking page calendar can see blocked days.
+- Allow authenticated owners to manage (`INSERT/UPDATE/DELETE`) only
+   their own events, based on `user_id`.
+
+## External Calendar Sync + Flash Sales
+
+The boat-level iCal bridge lives in the scheduled sync flow:
+
+- Edge Function: `supabase/functions/sync-boat-calendars/index.ts`
+- Local runner: `scripts/ops/sync-boat-calendars.mjs`
+- Cron helper: `supabase_test/supabase_schedule_calendar_sync.sql`
+
+What to do in Supabase:
+
+1. Deploy the Edge Function.
+2. Create the Vault secrets referenced in the SQL helper (`project_url` and `calendar_sync_secret`).
+3. Run `supabase_test/supabase_schedule_calendar_sync.sql` once in the SQL editor.
+
+That schedule keeps `calendar_events` in sync with external iCal feeds so the booking calendar can block imported busy windows automatically.
+
+Flash-sale support is data-only:
+
+- `boats.external_calendar_url` stores the iCal feed URL.
+- `boats.flash_sale_enabled` turns on the 30% last-minute discount path in the booking page.
+
+No separate cron is required for flash sales; the discount is evaluated live during checkout.
+
 ## Support
 
 If something breaks:

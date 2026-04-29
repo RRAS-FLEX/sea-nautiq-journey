@@ -155,6 +155,7 @@ const ReportIssue = () => {
   }, [reporterEmail]);
 
   const typeMeta = useMemo(() => reportTypeMeta[reportType], [reportType]);
+  const ActiveIcon = typeMeta.icon;
 
   const canSubmit =
     reporterName.trim() &&
@@ -280,6 +281,9 @@ const ReportIssue = () => {
                     <Flag className="h-5 w-5 text-aegean" />
                     {tl("Submit report", "Υποβολή αναφοράς")}
                   </CardTitle>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {typeMeta.description}
+                  </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -295,20 +299,6 @@ const ReportIssue = () => {
                       onChange={(event) => setReporterEmail(event.target.value)}
                     />
                   </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <Input
-                      placeholder={`${typeMeta.targetLabel}`}
-                      value={targetName}
-                      onChange={(event) => setTargetName(event.target.value)}
-                    />
-                    <Input
-                      placeholder={tl("Reference (optional)", "Αναφορά / κωδικός (προαιρετικό)")}
-                      value={targetRef}
-                      onChange={(event) => setTargetRef(event.target.value)}
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground -mt-2">{typeMeta.targetPlaceholder}</p>
 
                   <Input
                     placeholder={tl("Short subject", "Σύντομος τίτλος")}
@@ -347,20 +337,44 @@ const ReportIssue = () => {
                     className="min-h-[150px]"
                   />
 
-                  <div className="rounded-2xl border border-border bg-muted/20 p-4 space-y-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium text-foreground flex items-center gap-2">
-                        <Bug className="h-4 w-4 text-aegean" />
-                        {tl("Affected page / context", "Σελίδα / context που επηρεάζεται")}
-                      </p>
-                      {reportType === "website" ? <Badge variant="outline">Auto-captured</Badge> : null}
+                  {reportType === "website" ? (
+                    <div className="rounded-2xl border border-border bg-muted/20 p-4 space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium text-foreground flex items-center gap-2">
+                          <Bug className="h-4 w-4 text-aegean" />
+                          {tl("Affected page / context", "Σελίδα / context που επηρεάζεται")}
+                        </p>
+                        <Badge variant="outline">Auto-captured</Badge>
+                      </div>
+                      <Input
+                        placeholder={tl("URL or area of the app", "URL ή περιοχή της εφαρμογής")}
+                        value={pageUrl}
+                        onChange={(event) => setPageUrl(event.target.value)}
+                      />
                     </div>
-                    <Input
-                      placeholder={tl("URL or area of the app", "URL ή περιοχή της εφαρμογής")}
-                      value={pageUrl}
-                      onChange={(event) => setPageUrl(event.target.value)}
-                    />
-                  </div>
+                  ) : (
+                    <div className="rounded-2xl border border-border bg-muted/10 p-4 space-y-2">
+                      <p className="text-sm font-medium text-foreground flex items-center gap-2">
+                        <ActiveIcon className="h-4 w-4 text-aegean" />
+                        {typeMeta.title}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {typeMeta.targetPlaceholder}
+                      </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-1">
+                        <Input
+                          placeholder={typeMeta.targetLabel}
+                          value={targetName}
+                          onChange={(event) => setTargetName(event.target.value)}
+                        />
+                        <Input
+                          placeholder={tl("Reference (optional)", "Αναφορά / κωδικός (προαιρετικό)")}
+                          value={targetRef}
+                          onChange={(event) => setTargetRef(event.target.value)}
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex flex-col sm:flex-row gap-3">
                     <Button

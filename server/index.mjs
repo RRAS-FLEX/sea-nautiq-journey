@@ -5,6 +5,9 @@ import Stripe from "stripe";
 import { z } from "zod";
 import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
+import PDFDocument from "pdfkit";
+import { resolveFlashSalePricing } from "./flash-sale-pricing.mjs";
+import { resolveBoatVoucherPricing } from "./booking-pricing.mjs";
 
 dotenv.config({ path: ".env" });
 dotenv.config({ path: ".env.local", override: true });
@@ -47,6 +50,11 @@ const hasValidResendConfig =
   Boolean(process.env.RESEND_API_KEY) &&
   !hasPlaceholderValue(process.env.RESEND_API_KEY);
 
+const resendFromAddress =
+  (process.env.RESEND_FROM && process.env.RESEND_FROM.trim().length > 0)
+    ? process.env.RESEND_FROM.trim()
+    : "onboarding@resend.dev";
+
 const getSupabaseConfigErrorMessage = () =>
   "Supabase admin is not configured. Set real SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY values in .env/.env.local (do not use placeholder values).";
 
@@ -58,6 +66,16 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 });
 
 const resend = hasValidResendConfig ? new Resend(process.env.RESEND_API_KEY) : null;
+
+const testEmailRecipient =
+  (process.env.RESEND_TEST_EMAIL && process.env.RESEND_TEST_EMAIL.trim().length > 0)
+    ? process.env.RESEND_TEST_EMAIL.trim()
+    : null;
+
+const contactInboxAddress =
+  (process.env.CONTACT_INBOX && process.env.CONTACT_INBOX.trim().length > 0)
+    ? process.env.CONTACT_INBOX.trim()
+    : (process.env.RESEND_TEST_EMAIL || "info@nautiplex.com");
 
 const supabaseAdmin = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: {
@@ -109,6 +127,275 @@ const isSlotAvailableForRange = (occupiedSlots, departureTime, packageHours) => 
     const slotEnd = toMinutes(slot.end);
     if (slotStart === null || slotEnd === null) return false;
     return rangesOverlap(desiredStartMinutes, desiredEndMinutes, slotStart, slotEnd);
+  });
+};
+
+const buildBookingEmailContent = ({
+  booking,
+  customerName,
+  departureMarina,
+  receiptUrl,
+}) => {
+  const name = customerName || booking.customer_name || "Guest";
+  const boatName = booking.boat_name || "Your boat";
+  const startDate = booking.start_date || new Date().toISOString().slice(0, 10);
+  const marina = departureMarina || booking.departure_marina || "Departure marina";
+
+  const total = Number(booking.total_price ?? 0) || 0;
+  const paidNow = Number(booking.amount_due_now ?? total) || 0;
+  const remaining = Math.max(0, total - paidNow);
+
+  const formattedDate = new Date(startDate).toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
+  const subject = `Booking confirmed: ${boatName} on ${formattedDate}`;
+  const previewText = `Your Nautiplex booking for ${boatName} on ${formattedDate} is confirmed.`;
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      </head>
+      <body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #2D3748; margin: 0; padding: 0; background-color: #f9fafb;">
+        <div style="max-width: 600px; margin: 20px auto; padding: 20px; border: 1px solid #E2E8F0; border-radius: 8px; background-color: #ffffff;">
+          <div style="text-align: center; border-bottom: 2px solid #3182CE; padding-bottom: 20px;">
+            <img src="http://desk-jojos.tail9d3e44.ts.net:8080/nautiplex_logo.png" 
+                 alt="NAUTIPLEX" 
+                 style="height: 60px; width: auto;" />
+          </div>
+
+          <div style="background-color: #F7FAFC; padding: 30px; text-align: center; border-radius: 8px; margin: 20px 0;">
+            <h1 style="margin:0; font-size: 24px; color: #2D3748;">Booking Confirmed!</h1>
+            <p style="color: #718096; font-size: 16px;">Get ready to set sail, ${name}.</p>
+          </div>
+
+          <h2 style="font-size: 18px; color: #3182CE; border-bottom: 1px solid #EDF2F7; padding-bottom: 8px;">Trip Overview</h2>
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr><td style="padding: 12px 0; font-weight: bold; color: #4A5568; width: 40%;">Boat</td><td style="padding: 12px 0;">${boatName}</td></tr>
+            <tr><td style="padding: 12px 0; font-weight: bold; color: #4A5568;">Date</td><td style="padding: 12px 0;">${formattedDate}</td></tr>
+            <tr><td style="padding: 12px 0; font-weight: bold; color: #4A5568;">Marina</td><td style="padding: 12px 0;">${marina}</td></tr>
+          </table>
+
+          <h2 style="font-size: 18px; color: #3182CE; border-bottom: 1px solid #EDF2F7; padding-bottom: 8px; margin-top: 30px;">Payment Summary</h2>
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr><td style="padding: 12px 0; font-weight: bold; color: #4A5568;">Total Price</td><td style="padding: 12px 0;">€${total.toFixed(2)}</td></tr>
+            <tr><td style="padding: 12px 0; font-weight: bold; color: #4A5568;">Amount Paid Now</td><td style="padding: 12px 0; color: #38A169; font-weight: bold;">€${paidNow.toFixed(2)}</td></tr>
+            <tr><td style="padding: 12px 0; font-weight: bold; color: #4A5568;">Remaining Balance</td><td style="padding: 12px 0;">€${remaining.toFixed(2)}</td></tr>
+          </table>
+
+          ${receiptUrl
+            ? `<p style="margin-top: 16px; font-size: 14px;">Stripe receipt: <a href="${receiptUrl}" style="color: #3182CE;">View payment receipt</a></p>`
+            : ""}
+
+          <div style="text-align: center; margin: 40px 0;">
+            <a href="https://nautiplex.com/my-bookings" style="background-color: #3182CE; color: white; padding: 14px 30px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Manage My Booking</a>
+          </div>
+
+          <div style="text-align: center; margin-top: 40px; padding-top: 20px; border-top: 1px solid #E2E8F0;">
+            <p style="font-size: 14px; font-weight: bold; color: #4A5568; margin: 0;">Nautiplex Boat Rentals</p>
+            <p style="font-size: 12px; color: #A0AEC0; margin: 5px 0;">Athens, Greece &bull; Support: info@nautiplex.com</p>
+            <p style="font-size: 11px; color: #CBD5E0; margin-top: 20px;">
+              You received this email because you made a booking on nautiplex.com.<br />
+              &copy; 2026 Nautiplex. All rights reserved.
+            </p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  const lines = [
+    `Hi ${name},`,
+    "",
+    `Your Nautiplex booking for ${boatName} is confirmed.`,
+    `Date: ${formattedDate}`,
+    `Marina: ${marina}`,
+    `Total: €${total.toFixed(2)}`,
+    `Paid now: €${paidNow.toFixed(2)}`,
+    `Remaining: €${remaining.toFixed(2)}`,
+  ];
+
+  if (receiptUrl) {
+    lines.push("", `Stripe receipt: ${receiptUrl}`);
+  }
+
+  lines.push(
+    "",
+    "See you on the water,",
+    "Nautiplex",
+  );
+
+  const text = lines.join("\n");
+
+  return { subject, previewText, html, text };
+};
+
+const buildOwnerBookingEmailContent = ({
+  booking,
+  ownerName,
+  receiptUrl,
+}) => {
+  const safeOwnerName = ownerName || booking.owner_name || "Owner";
+  const guestName = booking.customer_name || "Guest";
+  const boatName = booking.boat_name || "Your boat";
+  const startDate = booking.start_date || new Date().toISOString().slice(0, 10);
+  const marina = booking.departure_marina || "Departure marina";
+
+  const total = Number(booking.total_price ?? 0) || 0;
+  const paidNow = Number(booking.amount_due_now ?? total) || 0;
+  const ownerPayout = Number(booking.owner_payout ?? 0) || 0;
+
+  const formattedDate = new Date(startDate).toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
+  const subject = `New Nautiplex booking for ${boatName} on ${formattedDate}`;
+  const previewText = `${guestName} just booked ${boatName} for ${formattedDate}.`;
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      </head>
+      <body style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #2D3748; margin: 0; padding: 0; background-color: #f9fafb;">
+        <div style="max-width: 600px; margin: 20px auto; padding: 20px; border: 1px solid #E2E8F0; border-radius: 8px; background-color: #ffffff;">
+          <div style="text-align: center; border-bottom: 2px solid #3182CE; padding-bottom: 20px;">
+            <img src="http://desk-jojos.tail9d3e44.ts.net:8080/nautiplex_logo.png" 
+                 alt="NAUTIPLEX" 
+                 style="height: 60px; width: auto;" />
+          </div>
+
+          <div style="background-color: #EBF8FF; padding: 24px; text-align: left; border-radius: 8px; margin: 20px 0;">
+            <h1 style="margin:0; font-size: 20px; color: #2D3748;">New booking on Nautiplex</h1>
+            <p style="color: #4A5568; font-size: 14px; margin-top: 8px;">Hi ${safeOwnerName},</p>
+            <p style="color: #4A5568; font-size: 14px;">${guestName} just booked <strong>${boatName}</strong> for <strong>${formattedDate}</strong>.</p>
+          </div>
+
+          <h2 style="font-size: 16px; color: #3182CE; border-bottom: 1px solid #EDF2F7; padding-bottom: 6px;">Trip details</h2>
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <tr><td style="padding: 8px 0; font-weight: bold; color: #4A5568; width: 40%;">Boat</td><td style="padding: 8px 0;">${boatName}</td></tr>
+            <tr><td style="padding: 8px 0; font-weight: bold; color: #4A5568;">Date</td><td style="padding: 8px 0;">${formattedDate}</td></tr>
+            <tr><td style="padding: 8px 0; font-weight: bold; color: #4A5568;">Marina</td><td style="padding: 8px 0;">${marina}</td></tr>
+            <tr><td style="padding: 8px 0; font-weight: bold; color: #4A5568;">Guest</td><td style="padding: 8px 0;">${guestName}</td></tr>
+          </table>
+
+          <h2 style="font-size: 16px; color: #3182CE; border-bottom: 1px solid #EDF2F7; padding-bottom: 6px; margin-top: 24px;">Payout overview</h2>
+          <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+            <tr><td style="padding: 8px 0; font-weight: bold; color: #4A5568;">Total price</td><td style="padding: 8px 0;">€${total.toFixed(2)}</td></tr>
+            <tr><td style="padding: 8px 0; font-weight: bold; color: #4A5568;">Paid now</td><td style="padding: 8px 0;">€${paidNow.toFixed(2)}</td></tr>
+            <tr><td style="padding: 8px 0; font-weight: bold; color: #4A5568;">Estimated payout</td><td style="padding: 8px 0; font-weight: bold; color: #2F855A;">€${ownerPayout.toFixed(2)}</td></tr>
+          </table>
+
+          ${receiptUrl
+            ? `<p style="margin-top: 12px; font-size: 13px;">Stripe receipt: <a href="${receiptUrl}" style="color: #3182CE;">View payment receipt</a></p>`
+            : ""}
+
+          <p style="margin-top: 24px; font-size: 13px; color: #4A5568;">
+            You can review booking details and coordinate with the guest from your Nautiplex owner dashboard.
+          </p>
+
+          <div style="text-align: center; margin: 30px 0;">
+            <a href="https://nautiplex.com/owner-dashboard" style="background-color: #3182CE; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block; font-size: 14px;">Open owner dashboard</a>
+          </div>
+
+          <div style="text-align: center; margin-top: 32px; padding-top: 16px; border-top: 1px solid #E2E8F0;">
+            <p style="font-size: 13px; font-weight: bold; color: #4A5568; margin: 0;">Nautiplex Boat Rentals</p>
+            <p style="font-size: 11px; color: #A0AEC0; margin: 6px 0;">Athens, Greece • Owner support: info@nautiplex.com</p>
+          </div>
+        </div>
+      </body>
+    </html>
+  `;
+
+  const textLines = [
+    `Hi ${safeOwnerName},`,
+    "",
+    `${guestName} just booked ${boatName} on ${formattedDate}.`,
+    `Marina: ${marina}`,
+    `Total price: €${total.toFixed(2)}`,
+    `Paid now: €${paidNow.toFixed(2)}`,
+    `Estimated payout: €${ownerPayout.toFixed(2)}`,
+  ];
+
+  if (receiptUrl) {
+    textLines.push("", `Stripe receipt: ${receiptUrl}`);
+  }
+
+  textLines.push(
+    "",
+    "You can review this booking from your Nautiplex owner dashboard.",
+    "",
+    "See you on the water,",
+    "Nautiplex team",
+  );
+
+  const text = textLines.join("\n");
+
+  return { subject, previewText, html, text };
+};
+
+const generateReceiptPdfBuffer = ({
+  booking,
+  receiptUrl,
+}) => {
+  const doc = new PDFDocument({ size: "A4", margin: 50 });
+  const chunks = [];
+
+  doc.on("data", (chunk) => chunks.push(chunk));
+
+  doc.fontSize(20).text("Nautiplex Booking Receipt", { align: "center" });
+  doc.moveDown();
+
+  doc.fontSize(12).text(`Booking ID: ${booking.id}`);
+  doc.text(`Boat: ${booking.boat_name || "N/A"}`);
+  doc.text(`Guest: ${booking.customer_name || "Guest"}`);
+  doc.text(`Email: ${booking.customer_email || ""}`);
+  doc.text(`Date: ${booking.start_date || "N/A"}`);
+  doc.text(`Marina: ${booking.departure_marina || "N/A"}`);
+  doc.moveDown();
+
+  const total = Number(booking.total_price ?? 0) || 0;
+  const paidNow = Number(booking.amount_due_now ?? total) || 0;
+  const ownerPayout = Number(booking.owner_payout ?? 0) || 0;
+
+  doc.fontSize(12).text(`Total price: €${total.toFixed(2)}`);
+  doc.text(`Amount paid now: €${paidNow.toFixed(2)}`);
+  doc.text(`Estimated owner payout: €${ownerPayout.toFixed(2)}`);
+
+  if (receiptUrl) {
+    doc.moveDown();
+    doc.text(`Stripe receipt: ${receiptUrl}`, { link: receiptUrl, underline: true });
+  }
+
+  doc.moveDown(2);
+  doc.fontSize(10).fillColor("#718096").text("Thank you for booking with Nautiplex.", { align: "center" });
+
+  doc.end();
+
+  return new Promise((resolve, reject) => {
+    doc.on("end", () => {
+      try {
+        const buffer = Buffer.concat(chunks);
+        resolve(buffer);
+      } catch (error) {
+        reject(error);
+      }
+    });
+
+    doc.on("error", (error) => {
+      reject(error);
+    });
   });
 };
 
@@ -223,6 +510,9 @@ app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async
         stripe_payment_intent_id: stripePaymentIntentId,
       };
 
+      let ownerEmail = null;
+      let ownerId = null;
+
       if (!bookingLoadError && booking) {
         // Derive customer fields from Stripe if missing.
         const stripeEmail = (session.customer_details?.email || session.customer_email || "").trim().toLowerCase() || null;
@@ -261,15 +551,17 @@ app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async
             boatName = boatName || boat.name || null;
             departureMarina = departureMarina || boat.departure_marina || null;
 
-            if (!ownerName && boat.owner_id) {
+            if (boat.owner_id) {
+              ownerId = boat.owner_id;
               const { data: owner } = await supabaseAdmin
                 .from("users")
-                .select("full_name, name")
+                .select("full_name, name, email")
                 .eq("id", boat.owner_id)
                 .maybeSingle();
 
               if (owner) {
-                ownerName = owner.full_name || owner.name || ownerName || null;
+                ownerName = ownerName || owner.full_name || owner.name || null;
+                ownerEmail = owner.email || ownerEmail;
               }
             }
           }
@@ -357,8 +649,9 @@ app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async
               .limit(1)
               .maybeSingle();
 
+            let receiptUrl = null;
+
             if (!existingEmail) {
-              let receiptUrl = null;
               if (stripePaymentIntentId && hasValidStripeConfig) {
                 try {
                   const paymentIntent = await stripe.paymentIntents.retrieve(stripePaymentIntentId, {
@@ -379,41 +672,18 @@ app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async
                 }
               }
 
-              const extrasLine = safeExtras.length > 0 ? safeExtras.join(", ") : "No add-ons selected";
-              const notesLine = safeNotes.trim() ? safeNotes.trim() : "No special requests added.";
-
-              const subject = `Booking receipt: ${boatName || booking.boat_name || "Boat"} on ${booking.start_date || "your trip date"}`;
-              const previewText = `Your ${booking.package_label || "boat trip"} with ${finalOwnerName} plus Stripe receipt.`;
-
-              const lines = [
-                `Hi ${finalCustomerName},`,
-                "",
-                `Here are your booking details for ${boatName || booking.boat_name || "your trip"}.`,
-                `Package: ${booking.package_label || "Nautiq experience"}`,
-                `Date: ${booking.start_date || "-"}`,
-                `Departure time: ${booking.departure_time || "-"}`,
-                `Meeting point: ${departureMarina || booking.departure_marina || "-"}`,
-                `Guests: ${Number(booking.guests ?? 0) || 1}`,
-                `Add-ons: ${extrasLine}`,
-                `Special requests: ${notesLine}`,
-                `Total confirmed: €${resolvedTotal}`,
-                `Paid now (${paymentPlan === "deposit" ? "30% deposit" : "full"}): €${amountDueNow}`,
-              ];
-
-              if (receiptUrl) {
-                lines.push("", `Stripe receipt: ${receiptUrl}`);
-              }
-
-              lines.push(
-                "",
-                `Host: ${finalOwnerName}`,
-                "We have also notified the owner about your confirmed booking.",
-                "",
-                "See you on the water,",
-                "Nautiq",
-              );
-
-              const body = lines.join("\n");
+              const { subject, previewText, html, text } = buildBookingEmailContent({
+                booking: {
+                  ...booking,
+                  boat_name: boatName || booking.boat_name,
+                  departure_marina: departureMarina || booking.departure_marina,
+                  total_price: resolvedTotal,
+                  amount_due_now: amountDueNow,
+                },
+                customerName: finalCustomerName,
+                departureMarina,
+                receiptUrl,
+              });
 
               await supabaseAdmin
                 .from("customer_emails")
@@ -422,21 +692,64 @@ app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async
                   to_email: normalizedEmail,
                   subject,
                   preview_text: previewText,
-                  body,
+                  body: text,
                   status: "queued",
                 });
 
               if (resend && hasValidResendConfig) {
                 try {
-                  await resend.emails.send({
-                    from: "Nautiq Bookings <bookings@mail.nautiq.com>",
-                    to: normalizedEmail,
+                  const { data: resendData, error: resendError } = await resend.emails.send({
+                    from: resendFromAddress,
+                    to: testEmailRecipient || normalizedEmail,
                     subject,
-                    text: body,
+                    text,
+                    html,
                   });
-                } catch {
-                  // Ignore Resend failures; email remains queued for fallback processing.
+
+                  if (resendError) {
+                    console.error("Resend send error in Stripe webhook", resendError);
+                  } else {
+                    console.log("Resend email queued in Stripe webhook", resendData);
+                  }
+                } catch (error) {
+                  console.error("Resend send failed in Stripe webhook", error);
+                  // Email remains queued for fallback processing.
                 }
+              }
+            }
+
+            // Send an owner notification email (does not depend on existing customer_emails row).
+            if (ownerEmail && resend && hasValidResendConfig) {
+              try {
+                const { subject: ownerSubject, previewText: ownerPreview, html: ownerHtml, text: ownerText } = buildOwnerBookingEmailContent({
+                  booking: {
+                    ...booking,
+                    boat_name: boatName || booking.boat_name,
+                    departure_marina: departureMarina || booking.departure_marina,
+                    total_price: resolvedTotal,
+                    amount_due_now: amountDueNow,
+                    owner_payout: ownerPayout,
+                  },
+                  ownerName: finalOwnerName,
+                  receiptUrl,
+                });
+
+                const ownerAddress = ownerEmail.trim().toLowerCase();
+                if (ownerAddress) {
+                  const { error: ownerResendError } = await resend.emails.send({
+                    from: resendFromAddress,
+                    to: testEmailRecipient || ownerAddress,
+                    subject: ownerSubject,
+                    text: ownerText,
+                    html: ownerHtml,
+                  });
+
+                  if (ownerResendError) {
+                    console.error("Resend send error in Stripe webhook (owner email)", ownerResendError);
+                  }
+                }
+              } catch (error) {
+                console.error("Owner email send failed in Stripe webhook", error);
               }
             }
           } catch {
@@ -457,6 +770,38 @@ app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), async
           .eq("id", bookingId);
       }
 
+      // Generate and store a PDF receipt in Supabase Storage (best-effort).
+      try {
+        const safeBoatName = String(booking?.boat_name || boatName || "boat")
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "") || "boat";
+
+        const buffer = await generateReceiptPdfBuffer({
+          booking: {
+            ...booking,
+            boat_name: boatName || booking?.boat_name,
+            departure_marina: departureMarina || booking?.departure_marina,
+            total_price: resolvedTotal,
+            amount_due_now: amountDueNow,
+            owner_payout: ownerPayout,
+          },
+          receiptUrl: null,
+        });
+
+        const receiptsPathOwner = ownerId || "unknown-owner";
+        const objectPath = `${receiptsPathOwner}/${safeBoatName}/${bookingId}.pdf`;
+
+        await supabaseAdmin.storage
+          .from("payment-receipts")
+          .upload(objectPath, buffer, {
+            contentType: "application/pdf",
+            upsert: true,
+          });
+      } catch (error) {
+        console.error("Failed to generate or upload booking receipt PDF", error);
+      }
+
       // No calendar_events writes here; Stripe confirmation only updates bookings.
     }
   }
@@ -468,6 +813,65 @@ app.use(express.json());
 
 app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
+});
+
+const contactMessageSchema = z.object({
+  name: z.string().min(1),
+  email: z.string().email(),
+  topic: z.string().min(1).max(64),
+  message: z.string().min(1).max(4000),
+  pageUrl: z.string().url().optional().nullable(),
+});
+
+app.post("/api/contact-messages", async (req, res) => {
+  if (!hasValidSupabaseAdminConfig) {
+    return res.status(500).json({ error: getSupabaseConfigErrorMessage() });
+  }
+
+  const parsed = contactMessageSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid request body", details: parsed.error.flatten() });
+  }
+
+  const { name, email, topic, message, pageUrl } = parsed.data;
+
+  try {
+    const { error } = await supabaseAdmin
+      .from("contact_messages")
+      .insert({
+        name,
+        email,
+        topic,
+        message,
+        page_url: pageUrl || null,
+      });
+
+    if (error) {
+      throw new Error(error.message || "Failed to store contact message");
+    }
+
+    if (resend && hasValidResendConfig && contactInboxAddress) {
+      try {
+        const { error: contactError } = await resend.emails.send({
+          from: resendFromAddress,
+          to: testEmailRecipient || contactInboxAddress,
+          subject: `[Nautiplex contact] ${topic} — ${name}`,
+          text: `From: ${name} <${email}>\nTopic: ${topic}\nPage: ${pageUrl || "(not provided)"}\n\n${message}`,
+        });
+
+        if (contactError) {
+          console.error("Resend send error in contact-messages", contactError);
+        }
+      } catch (error) {
+        console.error("Resend send failed in contact-messages", error);
+      }
+    }
+
+    return res.status(201).json({ ok: true });
+  } catch (error) {
+    const messageOut = error instanceof Error ? error.message : "Failed to handle contact message";
+    return res.status(500).json({ error: messageOut });
+  }
 });
 
 app.get("/api/stripe/config", (_req, res) => {
@@ -590,6 +994,156 @@ app.post("/api/stripe/connect/onboarding-link", requireSupabaseUser, requireOwne
   }
 });
 
+app.get("/api/stripe/connect/status", requireSupabaseUser, requireOwnerRole, async (req, res) => {
+  if (!hasValidStripeConfig) {
+    return res.status(500).json({ error: getStripeConfigErrorMessage() });
+  }
+
+  if (!hasValidSupabaseAdminConfig) {
+    return res.status(500).json({ error: getSupabaseConfigErrorMessage() });
+  }
+
+  const ownerId = req.ownerProfile?.id || req.supabaseUser.id;
+
+  const { data: owner, error: ownerError } = await supabaseAdmin
+    .from("users")
+    .select("stripe_account_id, stripe_payouts_ready")
+    .eq("id", ownerId)
+    .single();
+
+  if (ownerError || !owner) {
+    return res.status(404).json({ error: "Owner not found" });
+  }
+
+  if (!owner.stripe_account_id) {
+    return res.json({
+      hasAccount: false,
+      isReady: Boolean(owner.stripe_payouts_ready ?? false),
+      stripeAccountId: null,
+      detailsSubmitted: false,
+      chargesEnabled: false,
+      payoutsEnabled: false,
+    });
+  }
+
+  try {
+    const account = await stripe.accounts.retrieve(owner.stripe_account_id);
+    const detailsSubmitted = Boolean(account.details_submitted);
+    const chargesEnabled = Boolean(account.charges_enabled);
+    const payoutsEnabled = Boolean(account.payouts_enabled);
+
+    const isReady = detailsSubmitted && chargesEnabled && payoutsEnabled;
+
+    if (isReady && !owner.stripe_payouts_ready) {
+      await supabaseAdmin
+        .from("users")
+        .update({ stripe_payouts_ready: true })
+        .eq("id", ownerId);
+    }
+
+    return res.json({
+      hasAccount: true,
+      isReady,
+      stripeAccountId: account.id,
+      detailsSubmitted,
+      chargesEnabled,
+      payoutsEnabled,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to load Stripe Connect status";
+    const normalized = String(message).toLowerCase();
+    const isUnknownAccount =
+      normalized.includes("no such account") ||
+      normalized.includes("does not exist") ||
+      normalized.includes("acct_");
+
+    if (isUnknownAccount) {
+      await supabaseAdmin
+        .from("users")
+        .update({ stripe_account_id: null, stripe_payouts_ready: false })
+        .eq("id", ownerId);
+
+      return res.json({
+        hasAccount: false,
+        isReady: false,
+        stripeAccountId: null,
+        detailsSubmitted: false,
+        chargesEnabled: false,
+        payoutsEnabled: false,
+      });
+    }
+
+    return res.status(500).json({ error: message });
+  }
+});
+
+const updateOwnerBookingStatusSchema = z.object({
+  status: z.enum(["confirmed", "completed", "cancelled"]),
+});
+
+app.post("/api/owner/bookings/:bookingId/status", requireSupabaseUser, requireOwnerRole, async (req, res) => {
+  if (!hasValidSupabaseAdminConfig) {
+    return res.status(500).json({ error: getSupabaseConfigErrorMessage() });
+  }
+
+  const bookingId = String(req.params.bookingId || "").trim();
+  if (!bookingId) {
+    return res.status(400).json({ error: "Missing bookingId in path" });
+  }
+
+  const parsed = updateOwnerBookingStatusSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid request body", details: parsed.error.flatten() });
+  }
+
+  const { status } = parsed.data;
+  const ownerProfile = req.ownerProfile;
+
+  try {
+    const { data: booking, error: bookingError } = await supabaseAdmin
+      .from("bookings")
+      .select("id, boat_id, status")
+      .eq("id", bookingId)
+      .maybeSingle();
+
+    if (bookingError) {
+      return res.status(500).json({ error: bookingError.message || "Failed to load booking" });
+    }
+
+    if (!booking) {
+      return res.status(404).json({ error: "Booking not found" });
+    }
+
+    const { data: boat, error: boatError } = await supabaseAdmin
+      .from("boats")
+      .select("owner_id")
+      .eq("id", booking.boat_id)
+      .maybeSingle();
+
+    if (boatError) {
+      return res.status(500).json({ error: boatError.message || "Failed to load boat" });
+    }
+
+    if (!boat || !boat.owner_id || boat.owner_id !== ownerProfile.id) {
+      return res.status(403).json({ error: "You can only manage bookings on your own boats" });
+    }
+
+    const { error: updateError } = await supabaseAdmin
+      .from("bookings")
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq("id", bookingId);
+
+    if (updateError) {
+      return res.status(500).json({ error: updateError.message || "Failed to update booking status" });
+    }
+
+    return res.json({ ok: true, bookingId, status });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unexpected error updating booking status";
+    return res.status(500).json({ error: message });
+  }
+});
+
 const createCheckoutSchema = z.object({
   boatId: z.string().min(1),
   boatName: z.string().min(1).optional(),
@@ -598,7 +1152,9 @@ const createCheckoutSchema = z.object({
   bookingDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   departureTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
   packageHours: z.number().min(1).max(8).optional(),
+  guests: z.number().min(1).max(100).optional(),
   // Pricing context from the booking page
+  preDiscountTotal: z.number().min(1).optional(),
   totalPrice: z.number().min(1).optional(),
   amountDueNow: z.number().min(1).optional(),
   paymentPlan: z.enum(["deposit", "full"]).optional(),
@@ -629,10 +1185,10 @@ app.post("/api/stripe/create-checkout", async (req, res) => {
     bookingDate,
     departureTime,
     packageHours,
+    guests,
+    preDiscountTotal: preDiscountTotalFromClient,
     totalPrice: totalPriceFromClient,
-    amountDueNow: amountDueNowFromClient,
     paymentPlan,
-    depositAmount: depositAmountFromClient,
     successUrl,
     cancelUrl,
   } = parsed.data;
@@ -654,7 +1210,7 @@ app.post("/api/stripe/create-checkout", async (req, res) => {
 
   const { data: boatById, error: boatByIdError } = await supabaseAdmin
     .from("boats")
-    .select("id, name, owner_id, price_per_day, departure_marina")
+    .select("id, name, owner_id, price_per_day, departure_marina, flash_sale_enabled, party_ready")
     .eq("id", boatId)
     .maybeSingle();
 
@@ -663,7 +1219,7 @@ app.post("/api/stripe/create-checkout", async (req, res) => {
   if (!boat && boatName) {
     const { data: boatByName, error: boatByNameError } = await supabaseAdmin
       .from("boats")
-      .select("id, name, owner_id, price_per_day")
+      .select("id, name, owner_id, price_per_day, flash_sale_enabled, party_ready")
       .eq("name", boatName)
       .limit(1)
       .maybeSingle();
@@ -710,25 +1266,10 @@ app.post("/api/stripe/create-checkout", async (req, res) => {
     return res.status(400).json({ error: "Boat has no valid dynamic price (expected price_per_day)" });
   }
 
-  const totalPrice = Number.isFinite(totalPriceFromClient ?? NaN) && (totalPriceFromClient ?? 0) > 0
-    ? Number(totalPriceFromClient)
-    : dynamicPrice;
-
-  let logicalAmountDueNow = Number.isFinite(amountDueNowFromClient ?? NaN) && (amountDueNowFromClient ?? 0) > 0
-    ? Number(amountDueNowFromClient)
-    : totalPrice;
-
-  let depositAmount = Number.isFinite(depositAmountFromClient ?? NaN) && (depositAmountFromClient ?? 0) >= 0
-    ? Number(depositAmountFromClient)
-    : (paymentPlan === "deposit" ? Math.round(totalPrice * 0.3) : 0);
-
-  if (paymentPlan === "deposit" && logicalAmountDueNow <= 0) {
-    logicalAmountDueNow = depositAmount > 0 ? depositAmount : Math.round(totalPrice * 0.3);
-  }
-
-  if (logicalAmountDueNow <= 0) {
-    logicalAmountDueNow = totalPrice;
-  }
+  const hasPreDiscountTotal = Number.isFinite(preDiscountTotalFromClient ?? NaN) && (preDiscountTotalFromClient ?? 0) > 0;
+  const baseTotalPrice = hasPreDiscountTotal
+    ? Number(preDiscountTotalFromClient)
+    : (Number.isFinite(totalPriceFromClient ?? NaN) && (totalPriceFromClient ?? 0) > 0 ? Number(totalPriceFromClient) : dynamicPrice);
 
   const { data: ownerRaw, error: ownerError } = await supabaseAdmin
     .from("users")
@@ -754,12 +1295,6 @@ app.post("/api/stripe/create-checkout", async (req, res) => {
     return res.status(400).json({ error: "Boat owner has not completed Stripe Connect onboarding" });
   }
 
-  const amountCents = Math.round(logicalAmountDueNow * 100);
-  // Platform commission is fixed at 20% of the charged amount.
-  const applicationFeeAmount = Math.round(amountCents * 0.2);
-  const platformCommission = applicationFeeAmount / 100;
-  const ownerPayout = Math.max(0, logicalAmountDueNow - platformCommission);
-
   const todayIso = new Date().toISOString().slice(0, 10);
   const selectedDate = bookingDate ?? todayIso;
   const selectedDepartureTime = departureTime ?? "10:00";
@@ -773,6 +1308,32 @@ app.post("/api/stripe/create-checkout", async (req, res) => {
   if (!bookingEndTime) {
     return res.status(400).json({ error: "Choose a start time that keeps the trip within the same day and max 8 hours." });
   }
+
+    const {
+      subtotalAfterVoucher,
+      flashSaleEligible,
+      flashSaleDiscount,
+      discountedTotal,
+      depositAmount,
+      amountDueNow: logicalAmountDueNow,
+    } = resolveBoatVoucherPricing({
+      baseTotalPrice,
+      bookingDate: selectedDate,
+      departureTime: selectedDepartureTime,
+      flashSaleEnabled: Boolean(boat.flash_sale_enabled),
+      paymentPlan,
+  });
+
+  const amountCents = Math.round(logicalAmountDueNow * 100);
+  // Platform commission is fixed at 20% of the charged amount.
+  const applicationFeeAmount = Math.round(amountCents * 0.2);
+  const platformCommission = applicationFeeAmount / 100;
+  const ownerPayout = Math.max(0, logicalAmountDueNow - platformCommission);
+  const isPartyBooking = Boolean(boat.party_ready);
+  const partyTicketCode = isPartyBooking ? generatePartyTicketCode() : null;
+  const resolvedGuestCount = Math.max(1, Number(guests ?? 1));
+  const partyTicketCount = isPartyBooking ? resolvedGuestCount : 0;
+  const partyTicketStatus = isPartyBooking ? "issued" : null;
 
   // Server-side overlap guard: prevent starting checkout if another booking or
   // calendar event already occupies this time range on the selected date.
@@ -886,14 +1447,14 @@ app.post("/api/stripe/create-checkout", async (req, res) => {
         start_time: selectedDepartureTime,
         end_time: selectedEndTime,
         package_hours: selectedPackageHours,
-        total_price: totalPrice,
+          total_price: discountedTotal,
         status: "pending",
         // Hydrated identity & experience fields
         boat_name: boat.name,
         owner_name: ownerDisplayName,
         customer_name: customerNameFromEmail,
         package_label: "Stripe checkout",
-        guests: 1,
+        guests: resolvedGuestCount,
         departure_marina: boat.departure_marina ?? "",
         extras: [],
         notes: "",
@@ -904,6 +1465,10 @@ app.post("/api/stripe/create-checkout", async (req, res) => {
         deposit_amount: depositAmount,
         platform_commission: platformCommission,
         owner_payout: ownerPayout,
+        subtotal_after_voucher: subtotalAfterVoucher,
+        party_ticket_code: partyTicketCode,
+        party_ticket_count: partyTicketCount,
+        party_ticket_status: partyTicketStatus,
       })
       .select("id")
       .single();
@@ -1040,6 +1605,8 @@ app.post("/api/stripe/create-checkout", async (req, res) => {
       ownerStripeAccountId: owner.stripe_account_id,
       payoutMode,
       warning,
+      flashSaleEligible,
+      flashSaleDiscount,
     });
   } catch (error) {
     await supabaseAdmin
@@ -1058,6 +1625,12 @@ const cancelBookingSchema = z.object({
   customerEmail: z.string().email().optional(),
   reason: z.string().trim().max(500).optional(),
 });
+
+const generatePartyTicketCode = () => {
+  const stamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+  return `PRTY-${stamp}-${random}`;
+};
 
 const getBookingByStripeSessionSchema = z.object({
   sessionId: z.string().min(1),
@@ -1217,12 +1790,6 @@ app.post("/api/bookings/resend-customer-email", async (req, res) => {
     return res.status(400).json({ error: "Booking has no customer email and none was provided." });
   }
 
-  const extrasArray = Array.isArray(booking.extras) ? booking.extras : [];
-  const notesText = typeof booking.notes === "string" ? booking.notes : "";
-
-  const extrasLine = extrasArray.length > 0 ? extrasArray.join(", ") : "No add-ons selected";
-  const notesLine = notesText.trim() ? notesText.trim() : "No special requests added.";
-
   let receiptUrl = null;
   if (booking.stripe_payment_intent_id && hasValidStripeConfig) {
     try {
@@ -1243,40 +1810,12 @@ app.post("/api/bookings/resend-customer-email", async (req, res) => {
       // If Stripe lookup fails, continue without a receipt URL.
     }
   }
-
-  const timestamp = new Date().toISOString();
-  const subject = `Booking receipt: ${booking.boat_name || "Boat"} on ${booking.start_date || "your trip date"}`;
-  const previewText = `Your ${booking.package_label || "boat trip"} with ${booking.owner_name || "your host"} plus Stripe receipt.`;
-
-  const lines = [
-    `Hi ${booking.customer_name || "there"},`,
-    "",
-    `Here are your booking details for ${booking.boat_name || "your trip"}.`,
-    `Package: ${booking.package_label || "Nautiq experience"}`,
-    `Date: ${booking.start_date || "-"}`,
-    `Departure time: ${booking.departure_time || "-"}`,
-    `Meeting point: ${booking.departure_marina || "-"}`,
-    `Guests: ${Number(booking.guests ?? 0) || 1}`,
-    `Add-ons: ${extrasLine}`,
-    `Special requests: ${notesLine}`,
-    `Total confirmed: €${Number(booking.total_price ?? 0)}`,
-    `Paid now (${booking.payment_plan === "deposit" ? "30% deposit" : "full"}): €${Number(booking.amount_due_now ?? booking.total_price ?? 0)}`,
-  ];
-
-  if (receiptUrl) {
-    lines.push("", `Stripe receipt: ${receiptUrl}`);
-  }
-
-  lines.push(
-    "",
-    `Host: ${booking.owner_name || "your boat owner"}`,
-    "We have also notified the owner about your confirmed booking.",
-    "",
-    "See you on the water,",
-    "Nautiq",
-  );
-
-  const body = lines.join("\n");
+  const { subject, previewText, html, text } = buildBookingEmailContent({
+    booking,
+    customerName: booking.customer_name,
+    departureMarina: booking.departure_marina,
+    receiptUrl,
+  });
 
   const { data: customerEmailRow, error: emailError } = await supabaseAdmin
     .from("customer_emails")
@@ -1285,7 +1824,7 @@ app.post("/api/bookings/resend-customer-email", async (req, res) => {
       to_email: normalizedEmail,
       subject,
       preview_text: previewText,
-      body,
+      body: text,
       status: "queued",
     })
     .select("id")
@@ -1297,14 +1836,22 @@ app.post("/api/bookings/resend-customer-email", async (req, res) => {
 
   if (resend && hasValidResendConfig) {
     try {
-      await resend.emails.send({
-        from: "Nautiq Bookings <bookings@mail.nautiq.com>",
-        to: normalizedEmail,
+      const { data: resendData, error: resendError } = await resend.emails.send({
+        from: resendFromAddress,
+        to: testEmailRecipient || normalizedEmail,
         subject,
-        text: body,
+        text,
+        html,
       });
-    } catch {
-      // Ignore Resend failures; email remains queued for fallback processing.
+
+      if (resendError) {
+        console.error("Resend send error in resend-customer-email", resendError);
+      } else {
+        console.log("Resend email queued in resend-customer-email", resendData);
+      }
+    } catch (error) {
+      console.error("Resend send failed in resend-customer-email", error);
+      // Email remains queued for fallback processing.
     }
   }
 
@@ -1327,13 +1874,51 @@ app.get("/api/bookings/by-stripe-session", async (req, res) => {
 
   const sessionId = parsed.data.sessionId;
 
-  const { data: booking, error } = await supabaseAdmin
+  const { data: bookingBySessionId, error: bookingBySessionError } = await supabaseAdmin
     .from("bookings")
-    .select("id, boat_name, start_date, departure_time, amount_due_now, total_price, customer_email, status")
+    .select("id, boat_name, start_date, departure_time, amount_due_now, total_price, customer_email, status, stripe_session_id, party_ticket_code, party_ticket_count, party_ticket_status")
     .eq("stripe_session_id", sessionId)
     .maybeSingle();
 
-  if (error || !booking) {
+  let booking = bookingBySessionId;
+
+  if ((!booking || !booking.id) && hasValidStripeConfig) {
+    try {
+      const stripeSession = await stripe.checkout.sessions.retrieve(sessionId);
+      const bookingIdFromMetadata = stripeSession?.metadata?.bookingId;
+
+      if (bookingIdFromMetadata) {
+        const { data: bookingById } = await supabaseAdmin
+          .from("bookings")
+          .select("id, boat_name, start_date, departure_time, amount_due_now, total_price, customer_email, status, stripe_session_id, party_ticket_code, party_ticket_count, party_ticket_status")
+          .eq("id", bookingIdFromMetadata)
+          .maybeSingle();
+
+        if (bookingById) {
+          booking = bookingById;
+
+          if (!booking.stripe_session_id) {
+            try {
+              await supabaseAdmin
+                .from("bookings")
+                .update({ stripe_session_id: sessionId })
+                .eq("id", booking.id);
+            } catch {
+              // Best-effort backfill; ignore failures.
+            }
+          }
+        }
+      }
+    } catch {
+      // If Stripe lookup fails, fall back to DB-only behavior.
+    }
+  }
+
+  if (bookingBySessionError && !booking) {
+    return res.status(500).json({ error: bookingBySessionError.message || "Failed to look up booking" });
+  }
+
+  if (!booking) {
     return res.status(404).json({ error: "Booking not found for this session" });
   }
 
@@ -1349,6 +1934,9 @@ app.get("/api/bookings/by-stripe-session", async (req, res) => {
     amount,
     ownerNotified,
     emailQueued,
+    partyTicketCode: booking.party_ticket_code || "",
+    partyTicketCount: Number(booking.party_ticket_count ?? 0),
+    partyTicketStatus: booking.party_ticket_status || "",
   });
 });
 

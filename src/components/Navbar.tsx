@@ -81,7 +81,7 @@ const Navbar = () => {
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-card/90 backdrop-blur-xl border-b border-border shadow-[0_6px_24px_hsl(var(--ocean)_/_0.08)]">
-      <div className="container mx-auto flex items-center justify-between h-16 px-4">
+      <div className="w-full max-w-10xl mx-auto flex items-center justify-between h-16 px-4">
         <NautiqLogo />
 
         {/* Desktop Nav */}

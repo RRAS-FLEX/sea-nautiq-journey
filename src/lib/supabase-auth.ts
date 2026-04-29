@@ -1,6 +1,13 @@
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 import type { DatabaseUsersRow } from "./supabase";
+import {
+  clearRememberedSessionIssuedAt,
+  ensureRememberedSessionIssuedAt,
+  isRememberedSessionExpired,
+  markRememberedSessionIssuedAt,
+  setRememberMePreference,
+} from "./auth-session";
 
 export interface AuthUser {
   id: string;
@@ -136,10 +143,14 @@ const ensureUserProfile = async (user: User, fallbackName?: string): Promise<Dat
 export const signUpWithEmail = async (
   name: string,
   email: string,
-  password: string
+  password: string,
+  options?: { rememberMe?: boolean }
 ): Promise<AuthUser> => {
   const normalizedEmail = email.trim().toLowerCase();
   const normalizedName = name.trim();
+  const rememberMe = Boolean(options?.rememberMe);
+
+  setRememberMePreference(rememberMe);
 
   const { data: authData, error: authError } = await supabase.auth.signUp({
     email: normalizedEmail,
@@ -161,12 +172,21 @@ export const signUpWithEmail = async (
 
   const profile = await ensureUserProfile(authData.user, normalizedName);
   const authUser = mapProfileToAuthUser(profile);
+  if (rememberMe) {
+    markRememberedSessionIssuedAt();
+  } else {
+    clearRememberedSessionIssuedAt();
+  }
   writeCachedAuthUser(authUser);
   return authUser;
 };
 
-export const signInWithGoogle = async (redirectTo?: string): Promise<void> => {
+export const signInWithGoogle = async (
+  redirectTo?: string,
+  options?: { rememberMe?: boolean }
+): Promise<void> => {
   const target = redirectTo || `${window.location.origin}/`;
+  setRememberMePreference(Boolean(options?.rememberMe));
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
@@ -184,9 +204,13 @@ export const signInWithGoogle = async (redirectTo?: string): Promise<void> => {
  */
 export const signInWithEmail = async (
   email: string,
-  password: string
+  password: string,
+  options?: { rememberMe?: boolean }
 ): Promise<AuthUser> => {
   const usersTable = supabase.from("users") as any;
+  const rememberMe = Boolean(options?.rememberMe);
+
+  setRememberMePreference(rememberMe);
 
   const { data, error } = await supabase.auth.signInWithPassword({
     email: email.trim().toLowerCase(),
@@ -207,6 +231,11 @@ export const signInWithEmail = async (
     try {
       const profile = await ensureUserProfile(data.user);
       const authUser = mapProfileToAuthUser(profile);
+      if (rememberMe) {
+        markRememberedSessionIssuedAt();
+      } else {
+        clearRememberedSessionIssuedAt();
+      }
       writeCachedAuthUser(authUser);
       return authUser;
     } catch {
@@ -215,12 +244,22 @@ export const signInWithEmail = async (
       const resolved = cachedUser && cachedUser.id === sessionFallback.id
         ? { ...sessionFallback, isOwner: cachedUser.isOwner }
         : sessionFallback;
+      if (rememberMe) {
+        markRememberedSessionIssuedAt();
+      } else {
+        clearRememberedSessionIssuedAt();
+      }
       writeCachedAuthUser(resolved);
       return resolved;
     }
   }
 
   const authUser = mapProfileToAuthUser(userData);
+  if (rememberMe) {
+    markRememberedSessionIssuedAt();
+  } else {
+    clearRememberedSessionIssuedAt();
+  }
   writeCachedAuthUser(authUser);
   return authUser;
 };
@@ -239,6 +278,13 @@ export const getSessionUser = async (): Promise<AuthUser | null> => {
   if (sessionError || !session?.user) {
     return null;
   }
+
+  if (isRememberedSessionExpired()) {
+    await signOut();
+    return null;
+  }
+
+  ensureRememberedSessionIssuedAt();
 
   const sessionFallback = mapSessionToAuthUser(session.user);
 
@@ -278,6 +324,7 @@ export const signOut = async (): Promise<void> => {
     throw new Error(error.message || "Failed to sign out");
   }
 
+  clearRememberedSessionIssuedAt();
   writeCachedAuthUser(null);
 };
 

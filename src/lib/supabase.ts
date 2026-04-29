@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createAuthStorageAdapter } from "./auth-session";
 
 export type Database = {
   public: {
@@ -187,35 +188,47 @@ export type Database = {
       calendar_events: {
         Row: {
           id: string;
-          boat_id: string;
-          start_time: string | null;
+          user_id: string;
+          title: string;
+          description: string | null;
+          location: string | null;
+          start_time: string;
           end_time: string | null;
-          date: string;
-          type: "booked" | "blocked" | "maintenance";
-          guest_name: string | null;
+          all_day: boolean;
+          timezone: string | null;
+          created_at: string;
+          updated_at: string;
           booking_id: string | null;
-          created_at: string | null;
+          boat_id: string | null;
         };
         Insert: {
           id?: string;
-          boat_id: string;
-          start_time?: string | null;
+          user_id: string;
+          title: string;
+          description?: string | null;
+          location?: string | null;
+          start_time: string;
           end_time?: string | null;
-          date: string;
-          type: "booked" | "blocked" | "maintenance";
-          guest_name?: string | null;
+          all_day?: boolean;
+          timezone?: string | null;
+          created_at?: string;
+          updated_at?: string;
           booking_id?: string | null;
-          created_at?: string | null;
+          boat_id?: string | null;
         };
         Update: {
-          boat_id?: string;
-          start_time?: string | null;
+          user_id?: string;
+          title?: string;
+          description?: string | null;
+          location?: string | null;
+          start_time?: string;
           end_time?: string | null;
-          date?: string;
-          type?: "booked" | "blocked" | "maintenance";
-          guest_name?: string | null;
+          all_day?: boolean;
+          timezone?: string | null;
+          created_at?: string;
+          updated_at?: string;
           booking_id?: string | null;
-          created_at?: string | null;
+          boat_id?: string | null;
         };
       };
       admin_users: {
@@ -275,6 +288,40 @@ export type Database = {
           created_at?: string;
         };
       };
+      badges: {
+        Row: {
+          id: string;
+          name: string;
+          icon_slug: string;
+          description: string | null;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          icon_slug: string;
+          description?: string | null;
+        };
+        Update: {
+          name?: string;
+          icon_slug?: string;
+          description?: string | null;
+        };
+      };
+      boat_owner_badges: {
+        Row: {
+          owner_id: string;
+          badge_id: string;
+          assigned_at: string;
+        };
+        Insert: {
+          owner_id: string;
+          badge_id: string;
+          assigned_at?: string;
+        };
+        Update: {
+          assigned_at?: string;
+        };
+      };
     };
     Views: {};
     Functions: {};
@@ -309,6 +356,8 @@ const isServiceRoleKey = (token: string) => {
 let supabase: SupabaseClient<Database> | null = null;
 
 if (supabaseUrl && supabaseAnonKey && isAllowedSupabaseUrl(supabaseUrl) && !isServiceRoleKey(supabaseAnonKey)) {
+  const authStorage = createAuthStorageAdapter();
+
   supabase = createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
       persistSession: true,
@@ -316,6 +365,7 @@ if (supabaseUrl && supabaseAnonKey && isAllowedSupabaseUrl(supabaseUrl) && !isSe
       detectSessionInUrl: true,
       flowType: "pkce",
       storageKey: "nautiq.auth.token",
+      storage: authStorage,
     },
   });
 } else {
@@ -323,27 +373,39 @@ if (supabaseUrl && supabaseAnonKey && isAllowedSupabaseUrl(supabaseUrl) && !isSe
     "Supabase environment variables are missing or insecure. Database features will be disabled. " +
     "Use an HTTPS Supabase URL (or localhost for dev) and only the anon public key, never the service_role key."
   );
-  
-  // Create a dummy client that won't throw errors
+
+  const buildError = () => ({
+    data: null,
+    error: new Error("Supabase not configured"),
+  });
+
+  // Create a dummy client that mimics Supabase response shapes so callers
+  // receive a structured error instead of hanging on rejected promises.
   supabase = {
     auth: {
-      signUp: () => Promise.reject(new Error("Supabase not configured")),
-      signInWithPassword: () => Promise.reject(new Error("Supabase not configured")),
-      signOut: () => Promise.reject(new Error("Supabase not configured")),
-      getSession: () => Promise.resolve({ data: { session: null }, error: null }),
+      signUp: async () => {
+        throw new Error("Supabase not configured");
+      },
+      signInWithPassword: async () => {
+        throw new Error("Supabase not configured");
+      },
+      signOut: async () => {
+        throw new Error("Supabase not configured");
+      },
+      getSession: async () => buildError(),
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
     },
     from: () => ({
-      select: () => Promise.reject(new Error("Supabase not configured")),
-      insert: () => Promise.reject(new Error("Supabase not configured")),
-      update: () => Promise.reject(new Error("Supabase not configured")),
-      delete: () => Promise.reject(new Error("Supabase not configured")),
+      select: async () => buildError(),
+      insert: async () => buildError(),
+      update: async () => buildError(),
+      delete: async () => buildError(),
     }),
     storage: {
       from: () => ({
-        upload: () => Promise.reject(new Error("Supabase not configured")),
-        list: () => Promise.reject(new Error("Supabase not configured")),
-        createSignedUrl: () => Promise.reject(new Error("Supabase not configured")),
+        upload: async () => buildError(),
+        list: async () => buildError(),
+        createSignedUrl: async () => buildError(),
       }),
     },
   } as any;

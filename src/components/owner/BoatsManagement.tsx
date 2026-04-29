@@ -1,21 +1,35 @@
-import { Edit2, Trash2 } from "lucide-react";
+import { Edit2, Trash2, Eye } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Badge } from "../ui/badge";
-import { getOwnerBoats, deleteOwnerBoat, OwnerBoat } from "../../lib/owner-dashboard";
+import { getOwnerBoats, deleteOwnerBoat, updateOwnerBoat, OwnerBoat } from "../../lib/owner-dashboard";
+import { buildBoatDetailsPath } from "@/lib/boats";
 
 interface BoatsManagementProps {
   onAddBoat: () => void;
+  onEditBoat: (boat: OwnerBoat) => void;
 }
 
-const BoatsManagement = ({ onAddBoat }: BoatsManagementProps) => {
+const BoatsManagement = ({ onAddBoat, onEditBoat }: BoatsManagementProps) => {
   const [boats, setBoats] = useState<OwnerBoat[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     const loadBoats = async () => {
-      const nextBoats = await getOwnerBoats();
-      setBoats(nextBoats);
+      try {
+        setIsLoading(true);
+        setLoadError(null);
+        const nextBoats = await getOwnerBoats();
+        setBoats(nextBoats);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to load boats";
+        setLoadError(message);
+      } finally {
+        setIsLoading(false);
+      }
     };
 
     loadBoats();
@@ -25,6 +39,20 @@ const BoatsManagement = ({ onAddBoat }: BoatsManagementProps) => {
     if (confirm("Are you sure you want to delete this boat?")) {
       await deleteOwnerBoat(id);
       setBoats((currentBoats) => currentBoats.filter((boat) => boat.id !== id));
+    }
+  };
+
+  const toggleVisibility = async (boat: OwnerBoat) => {
+    const nextStatus = boat.status === "active" ? "inactive" : "active";
+    try {
+      const updated = await updateOwnerBoat(boat.id, { status: nextStatus });
+      if (updated) {
+        setBoats((currentBoats) =>
+          currentBoats.map((b) => (b.id === boat.id ? { ...b, status: nextStatus } : b)),
+        );
+      }
+    } catch {
+      // Silently ignore; in real UI we might show a toast.
     }
   };
 
@@ -40,7 +68,23 @@ const BoatsManagement = ({ onAddBoat }: BoatsManagementProps) => {
           </div>
         </CardHeader>
         <CardContent>
-          {boats.length > 0 ? (
+          {loadError ? (
+            <div className="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {loadError}
+            </div>
+          ) : null}
+
+          {isLoading ? (
+            <div className="grid grid-cols-1 gap-4">
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div key={`boat-skeleton-${index}`} className="rounded-xl border border-border p-4 space-y-3">
+                  <div className="h-5 w-40 rounded bg-muted animate-pulse" />
+                  <div className="h-4 w-52 rounded bg-muted/80 animate-pulse" />
+                  <div className="h-4 w-32 rounded bg-muted/70 animate-pulse" />
+                </div>
+              ))}
+            </div>
+          ) : boats.length > 0 ? (
             <div className="grid grid-cols-1 gap-4">
               {boats.map((boat) => (
                 <div
@@ -70,6 +114,22 @@ const BoatsManagement = ({ onAddBoat }: BoatsManagementProps) => {
                           Skipper required
                         </Badge>
                       ) : null}
+                      {boat.externalCalendarUrl ? (
+                        <Badge variant="outline" className="text-[10px]">
+                          iCal sync
+                        </Badge>
+                      ) : null}
+                      {boat.flashSaleEnabled ? (
+                        <Badge variant="outline" className="text-[10px]">
+                          Flash sale
+                        </Badge>
+                      ) : null}
+                      {boat.partyReady ? (
+                        <Badge variant="outline" className="text-[10px]">
+                          Party ready
+                        </Badge>
+                      ) : null}
+                      {/* Voucher feature removed */}
                       {boat.documents.length > 0 ? (
                         <Badge variant="outline" className="text-[10px]">
                           {boat.documents.length} papers uploaded
@@ -89,14 +149,40 @@ const BoatsManagement = ({ onAddBoat }: BoatsManagementProps) => {
                   </div>
 
                   <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                    <div className="text-right">
-                      <p className="text-sm text-muted-foreground">€{boat.pricePerDay}/day</p>
-                      <Badge className={boat.status === "active" ? "bg-emerald-500 mt-1" : "bg-slate-400 mt-1"}>
-                        {boat.status}
-                      </Badge>
+                    <div className="text-right space-y-1">
+                      <p className="text-sm text-muted-foreground">€{boat.pricePerDay} starting</p>
+                      <div className="flex items-center justify-end gap-2">
+                        <Badge className={boat.status === "active" ? "bg-emerald-500" : "bg-slate-400"}>
+                          {boat.status}
+                        </Badge>
+                        <Button
+                          size="xs" asChild variant="outline"
+                          className="text-[11px] px-2 h-6"
+                        >
+                          <button type="button" onClick={() => toggleVisibility(boat)}>
+                            {boat.status === "active" ? "Hide" : "Show"}
+                          </button>
+                        </Button>
+                      </div>
                     </div>
                     <div className="flex gap-2">
-                      <Button size="sm" variant="outline" className="gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-2"
+                        asChild
+                      >
+                        <Link to={`/boats/${boat.id}?owner-preview=1`}>
+                          <Eye className="h-4 w-4" />
+                          View
+                        </Link>
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-2"
+                        onClick={() => onEditBoat(boat)}
+                      >
                         <Edit2 className="h-4 w-4" />
                         Edit
                       </Button>
@@ -125,7 +211,7 @@ const BoatsManagement = ({ onAddBoat }: BoatsManagementProps) => {
         </CardContent>
       </Card>
 
-      {boats.length > 0 && (
+      {!isLoading && boats.length > 0 && (
         <Card className="shadow-card">
           <CardHeader>
             <CardTitle>Boat Statistics</CardTitle>

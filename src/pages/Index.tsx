@@ -3,7 +3,6 @@ import { useSEO } from "@/hooks/useSEO";
 import Navbar from "@/components/Navbar";
 import HeroSection from "@/components/HeroSection";
 import FeaturedBoats from "@/components/FeaturedBoats";
-import TopPackages from "@/components/TopPackages";
 import Destinations from "@/components/Destinations";
 import HowItWorks from "@/components/HowItWorks";
 import OwnerCTA from "@/components/OwnerCTA";
@@ -43,7 +42,6 @@ const Index = () => {
       <>
         <HeroSection onFindBoats={handleFindBoats} />
         <FeaturedBoats searchCriteria={searchCriteria} />
-        <TopPackages />
         <Destinations />
         <HowItWorks />
         <OwnerCTA />

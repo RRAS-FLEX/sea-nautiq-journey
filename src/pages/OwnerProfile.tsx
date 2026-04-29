@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  BarChart3,
   CalendarCheck2,
   Camera,
   Flag,
@@ -20,7 +19,6 @@ import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import AddBoatModal from "../components/owner/AddBoatModal";
-import PackageManagement from "../components/owner/PackageManagement";
 import { getOwnerBoats, getOwnerStats, OwnerBoat } from "../lib/dashboard-hybrid";
 import { useCurrentUser } from "../hooks/useCurrentUser";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -29,37 +27,49 @@ import { supabase } from "@/lib/supabase";
 import { OwnerFleetPageSkeleton } from "@/components/loading/LoadingUI";
 import { useToast } from "@/hooks/use-toast";
 import { getUserAvatarUrl, uploadUserAvatar } from "@/lib/profile-avatar";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const OwnerProfile = () => {
   const { tl } = useLanguage();
   const { user } = useCurrentUser();
   const { toast } = useToast();
+
   const [showAddBoat, setShowAddBoat] = useState(false);
   const [editingBoat, setEditingBoat] = useState<OwnerBoat | null>(null);
   const [ownerBoats, setOwnerBoats] = useState<OwnerBoat[]>([]);
-  const [ownerStatsData, setOwnerStatsData] = useState({ listedBoats: 0, totalBookings: 0, totalRevenue: 0 });
+  const [ownerStatsData, setOwnerStatsData] = useState({
+    listedBoats: 0,
+    totalBookings: 0,
+    totalRevenue: 0,
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
+
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [profileName, setProfileName] = useState(user?.name ?? "");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  const [stripeStatus, setStripeStatus] = useState<any | null>(null);
+  const [isStripeStatusLoading, setIsStripeStatusLoading] = useState(true);
+  const payoutsReady = Boolean((stripeStatus as any)?.isReady);
+
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
-    setProfileName(user?.name ?? "");
-  }, [user?.name]);
-
+  // Load owner stats and boats
   useEffect(() => {
     const loadData = async () => {
       try {
         setIsLoading(true);
         setLoadError("");
+
         const [boatsData, statsData] = await Promise.all([
           withRetry(() => getOwnerBoats(), { retries: 2, initialDelayMs: 220 }),
           withRetry(() => getOwnerStats(), { retries: 2, initialDelayMs: 220 }),
         ]);
+
         setOwnerBoats(boatsData);
         setOwnerStatsData(statsData);
       } catch (error) {
@@ -73,6 +83,12 @@ const OwnerProfile = () => {
     loadData();
   }, []);
 
+  // Keep profile name in sync with user
+  useEffect(() => {
+    setProfileName(user?.name ?? "");
+  }, [user?.name]);
+
+  // Load avatar from Supabase storage
   useEffect(() => {
     if (!user?.id) {
       setAvatarUrl(null);
@@ -80,6 +96,7 @@ const OwnerProfile = () => {
     }
 
     let cancelled = false;
+
     const loadAvatar = async () => {
       try {
         const url = await getUserAvatarUrl(user.id);
@@ -93,11 +110,45 @@ const OwnerProfile = () => {
       }
     };
 
-    loadAvatar();
+    void loadAvatar();
+
     return () => {
       cancelled = true;
     };
   }, [user?.id]);
+
+  // Load Stripe Connect status for profile visibility banner
+  useEffect(() => {
+    const loadStripeStatus = async () => {
+      try {
+        setIsStripeStatusLoading(true);
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        const apiBaseUrl = (import.meta as any).env?.VITE_API_BASE_URL?.trim?.() ?? "";
+        const base = apiBaseUrl ? apiBaseUrl.replace(/\/$/, "") : "";
+        const statusUrl = `${base}/api/stripe/connect/status`;
+
+        const response = await fetch(statusUrl, {
+          method: "GET",
+          headers: {
+            ...(session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}),
+          },
+        });
+
+        if (!response.ok) return;
+        const json = await response.json();
+        setStripeStatus(json);
+      } catch (error) {
+        console.error("Failed to load Stripe Connect status (profile)", error);
+      } finally {
+        setIsStripeStatusLoading(false);
+      }
+    };
+
+    void loadStripeStatus();
+  }, []);
 
   const handleAvatarFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -157,8 +208,15 @@ const OwnerProfile = () => {
     }
   };
 
-  const handleCloseAdd = () => { setShowAddBoat(false); refreshBoats(); };
-  const handleCloseEdit = () => { setEditingBoat(null); refreshBoats(); };
+  const handleCloseAdd = () => {
+    setShowAddBoat(false);
+    void refreshBoats();
+  };
+
+  const handleCloseEdit = () => {
+    setEditingBoat(null);
+    void refreshBoats();
+  };
 
   const handleSaveProfile = async () => {
     const trimmedName = profileName.trim();
@@ -195,6 +253,7 @@ const OwnerProfile = () => {
         title: "Profile updated",
         description: "Your profile details were saved.",
       });
+
       window.location.reload();
     } catch (error) {
       toast({
@@ -206,10 +265,6 @@ const OwnerProfile = () => {
       setIsSavingProfile(false);
     }
   };
-
-  const averageRevenuePerBooking = ownerStatsData.totalBookings > 0
-    ? Math.round(ownerStatsData.totalRevenue / ownerStatsData.totalBookings)
-    : 0;
 
   if (isLoading) {
     return (
@@ -227,11 +282,17 @@ const OwnerProfile = () => {
         <Navbar />
         <main className="pt-24 pb-16">
           <div className="container mx-auto px-4 text-center space-y-3">
-            <h1 className="text-3xl font-heading font-bold text-foreground">{tl("Could not load owner area", "Δεν φορτώθηκε η περιοχή ιδιοκτήτη")}</h1>
+            <h1 className="text-3xl font-heading font-bold text-foreground">
+              {tl("Could not load owner area", "Δεν φορτώθηκε η περιοχή ιδιοκτήτη")}
+            </h1>
             <p className="text-muted-foreground">{loadError}</p>
             <div className="flex justify-center gap-3">
-              <Button variant="outline" onClick={() => window.location.reload()}>{tl("Reload page", "Ανανέωση σελίδας")}</Button>
-              <Button variant="outline" onClick={() => void refreshBoats()}>{tl("Try again", "Δοκίμασε ξανά")}</Button>
+              <Button variant="outline" onClick={() => window.location.reload()}>
+                {tl("Reload page", "Ανανέωση σελίδας")}
+              </Button>
+              <Button variant="outline" onClick={() => void refreshBoats()}>
+                {tl("Try again", "Δοκίμασε ξανά")}
+              </Button>
             </div>
           </div>
         </main>
@@ -247,17 +308,65 @@ const OwnerProfile = () => {
       <main className="pt-16">
         <section className="py-12 md:py-16 border-b border-border bg-muted/40">
           <div className="container mx-auto px-4">
+            <div className="mb-5">
+              {isStripeStatusLoading ? (
+                <div className="max-w-2xl rounded-lg border border-border bg-background/70 px-3 py-2 shadow-sm">
+                  <div className="space-y-2">
+                    <Skeleton className="h-4 w-56" />
+                    <Skeleton className="h-3 w-72" />
+                  </div>
+                </div>
+              ) : stripeStatus && payoutsReady ? (
+                <div className="max-w-2xl rounded-lg border border-emerald-500/60 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 shadow-sm">
+                  <p className="font-medium">
+                    {tl(
+                      "Your owner profile is visible to travelers.",
+                      "Το προφίλ ιδιοκτήτη είναι ορατό στους ταξιδιώτες.",
+                    )}
+                  </p>
+                  <p className="mt-0.5 text-xs text-emerald-900/80">
+                    {tl(
+                      "Stripe payouts are connected and ready.",
+                      "Οι πληρωμές Stripe είναι συνδεδεμένες και έτοιμες.",
+                    )}
+                  </p>
+                </div>
+              ) : null}
+              {stripeStatus && !payoutsReady ? (
+                <div className="mt-3 max-w-2xl rounded-lg border border-amber-400/60 bg-amber-50/90 px-3 py-2 text-sm text-amber-900 shadow-sm">
+                  <p className="font-medium">
+                    {tl(
+                      "Your owner profile is currently hidden.",
+                      "Το προφίλ ιδιοκτήτη είναι προς το παρόν κρυφό.",
+                    )}
+                  </p>
+                  <p className="mt-0.5 text-xs text-amber-900/80">
+                    {tl(
+                      "Connect Stripe payouts and set at least one boat to Active to make it visible.",
+                      "Σύνδεσε τις πληρωμές Stripe και όρισε τουλάχιστον ένα σκάφος σε Ενεργό για να γίνει ορατό.",
+                    )}
+                  </p>
+                </div>
+              ) : null}
+            </div>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
               <Card className="lg:col-span-2 shadow-card-hover">
                 <CardContent className="pt-6">
                   <div className="flex flex-col md:flex-row md:items-center gap-5">
                     <div className="space-y-2">
-                    <Avatar className="h-20 w-20 border border-border">
-                      {avatarUrl ? <AvatarImage src={avatarUrl} alt={user?.name ?? "Owner avatar"} /> : null}
-                      <AvatarFallback className="text-xl font-semibold">
-                        {user?.name?.split(" ").map((p) => p[0]).join("").slice(0, 2).toUpperCase() ?? "OW"}
-                      </AvatarFallback>
-                    </Avatar>
+                      <Avatar className="h-20 w-20 border border-border">
+                        {avatarUrl ? (
+                          <AvatarImage src={avatarUrl} alt={user?.name ?? "Owner avatar"} />
+                        ) : null}
+                        <AvatarFallback className="text-xl font-semibold">
+                          {user?.name
+                            ?.split(" ")
+                            .map((p) => p[0])
+                            .join("")
+                            .slice(0, 2)
+                            .toUpperCase() ?? "OW"}
+                        </AvatarFallback>
+                      </Avatar>
                       <input
                         ref={avatarInputRef}
                         type="file"
@@ -287,9 +396,13 @@ const OwnerProfile = () => {
                             placeholder="Your full name"
                           />
                         ) : (
-                          <h1 className="text-2xl md:text-3xl font-heading font-bold text-foreground">{user?.name ?? "Owner"}</h1>
+                          <h1 className="text-2xl md:text-3xl font-heading font-bold text-foreground">
+                            {user?.name ?? "Owner"}
+                          </h1>
                         )}
-                        <Badge className="bg-gradient-accent text-accent-foreground">{tl("Verified Owner", "Επαληθευμένος Ιδιοκτήτης")}</Badge>
+                        <Badge className="bg-gradient-accent text-accent-foreground">
+                          {tl("Verified Owner", "Επαληθευμένος Ιδιοκτήτης")}
+                        </Badge>
                       </div>
                       <p className="text-muted-foreground max-w-2xl">
                         {user?.email ?? "Manage your boats and bookings from the owner dashboard."}
@@ -307,7 +420,9 @@ const OwnerProfile = () => {
                             onClick={handleSaveProfile}
                             disabled={isSavingProfile}
                           >
-                            {isSavingProfile ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : null}
+                            {isSavingProfile ? (
+                              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+                            ) : null}
                             Save profile
                           </Button>
                           <Button
@@ -331,29 +446,40 @@ const OwnerProfile = () => {
 
               <Card className="shadow-card">
                 <CardHeader>
-                  <CardTitle className="text-lg">{tl("Profile Actions", "Ενέργειες Προφίλ")}</CardTitle>
+                  <CardTitle className="text-lg">
+                    {tl("Profile Actions", "Ενέργειες Προφίλ")}
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   <Button
-                    className="w-full bg-gradient-accent text-accent-foreground gap-2"
+                    variant="outline"
+                    className="w-full gap-2"
                     onClick={() => setIsEditingProfile(true)}
                     disabled={!user?.id}
                   >
                     <Pencil className="h-4 w-4" />
                     {tl("Edit Profile", "Επεξεργασία Προφίλ")}
                   </Button>
-                  <Button asChild variant="outline" className="w-full">
-                    <Link to="/owner-dashboard">{tl("Open Owner Dashboard", "Άνοιγμα Πίνακα Ιδιοκτήτη")}</Link>
+                  <Button
+                    asChild
+                    className="w-full bg-gradient-accent text-accent-foreground gap-2 shadow-sm"
+                  >
+                    <Link to="/owner-dashboard">
+                      {tl("Open Owner Dashboard", "Άνοιγμα Πίνακα Ιδιοκτήτη")}
+                    </Link>
                   </Button>
                   <Button asChild variant="outline" className="w-full">
-                    <Link to="/chat">Owner inbox</Link>
+                    <Link to="/history">
+                      {tl("View trip history", "Ιστορικό εκδρομών")}
+                    </Link>
                   </Button>
-                  <Button variant="outline" className="w-full gap-2" onClick={() => setShowAddBoat(true)}>
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2"
+                    onClick={() => setShowAddBoat(true)}
+                  >
                     <Plus className="h-4 w-4" />
                     {tl("Add Another Boat", "Προσθήκη Νέου Σκάφους")}
-                  </Button>
-                  <Button asChild variant="outline" className="w-full">
-                    <Link to="/business-promotions">{tl("Business promotion tickets", "Αιτήματα προώθησης επιχειρήσεων")}</Link>
                   </Button>
                   <Button asChild variant="outline" className="w-full gap-2">
                     <Link to="/report?type=customer">
@@ -361,7 +487,11 @@ const OwnerProfile = () => {
                       {tl("Report a customer", "Αναφορά πελάτη")}
                     </Link>
                   </Button>
-                  <Button asChild variant="ghost" className="w-full gap-2 justify-start text-muted-foreground hover:text-foreground">
+                  <Button
+                    asChild
+                    variant="ghost"
+                    className="w-full gap-2 justify-start text-muted-foreground hover:text-foreground"
+                  >
                     <Link to="/report?type=website">
                       <Flag className="h-4 w-4" />
                       {tl("Report a website issue", "Αναφορά προβλήματος ιστοσελίδας")}
@@ -380,9 +510,13 @@ const OwnerProfile = () => {
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between mb-3">
                     <CalendarCheck2 className="h-5 w-5 text-aegean" />
-                    <Badge variant="outline" className="text-[10px]">Live</Badge>
+                    <Badge variant="outline" className="text-[10px]">
+                      Live
+                    </Badge>
                   </div>
-                  <p className="text-2xl font-heading font-bold text-foreground">{ownerStatsData.totalBookings}</p>
+                  <p className="text-2xl font-heading font-bold text-foreground">
+                    {ownerStatsData.totalBookings}
+                  </p>
                   <p className="text-sm text-muted-foreground">Total Bookings</p>
                 </CardContent>
               </Card>
@@ -390,11 +524,18 @@ const OwnerProfile = () => {
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between mb-3">
                     <Star className="h-5 w-5 text-aegean" />
-                    <Badge variant="outline" className="text-[10px]">Live</Badge>
+                    <Badge variant="outline" className="text-[10px]">
+                      Live
+                    </Badge>
                   </div>
                   <p className="text-2xl font-heading font-bold text-foreground">
                     {ownerBoats.length > 0
-                      ? (ownerBoats.reduce((sum, boat) => sum + Number(boat.rating || 0), 0) / ownerBoats.length).toFixed(1)
+                      ? (
+                          ownerBoats.reduce(
+                            (sum, boat) => sum + Number(boat.rating || 0),
+                            0,
+                          ) / ownerBoats.length
+                        ).toFixed(1)
                       : "0.0"}
                   </p>
                   <p className="text-sm text-muted-foreground">Average Rating</p>
@@ -404,9 +545,13 @@ const OwnerProfile = () => {
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between mb-3">
                     <Wallet className="h-5 w-5 text-aegean" />
-                    <Badge variant="outline" className="text-[10px]">Live</Badge>
+                    <Badge variant="outline" className="text-[10px]">
+                      Live
+                    </Badge>
                   </div>
-                  <p className="text-2xl font-heading font-bold text-foreground">€{ownerStatsData.totalRevenue.toLocaleString()}</p>
+                  <p className="text-2xl font-heading font-bold text-foreground">
+                    €{ownerStatsData.totalRevenue.toLocaleString()}
+                  </p>
                   <p className="text-sm text-muted-foreground">Total Revenue</p>
                 </CardContent>
               </Card>
@@ -414,101 +559,43 @@ const OwnerProfile = () => {
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between mb-3">
                     <Ship className="h-5 w-5 text-aegean" />
-                    <Badge variant="outline" className="text-[10px]">Live</Badge>
+                    <Badge variant="outline" className="text-[10px]">
+                      Live
+                    </Badge>
                   </div>
-                  <p className="text-2xl font-heading font-bold text-foreground">{ownerStatsData.listedBoats}</p>
+                  <p className="text-2xl font-heading font-bold text-foreground">
+                    {ownerStatsData.listedBoats}
+                  </p>
                   <p className="text-sm text-muted-foreground">Listed Boats</p>
                 </CardContent>
               </Card>
             </div>
-
-            <Card className="shadow-card-hover">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-xl">Fleet Overview</CardTitle>
-                <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowAddBoat(true)}>
-                  <Plus className="h-4 w-4" />
-                  Add Boat
-                </Button>
-              </CardHeader>
-              <CardContent>
-                {ownerBoats.length > 0 ? (
-                  <div className="space-y-3">
-                    {ownerBoats.map((boat) => (
-                      <div key={boat.id} className="rounded-xl border border-border p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                        <div>
-                          <p className="font-semibold text-foreground">{boat.name}</p>
-                          <p className="text-sm text-muted-foreground">{boat.location} • Capacity {boat.capacity} guests</p>
-                        </div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Badge variant="outline">€{Number(boat.pricePerDay || 0)}/day</Badge>
-                          <Badge className="bg-turquoise/20 text-foreground border-transparent">{Number(boat.rating || 0).toFixed(1)}★ rating</Badge>
-                          <Badge variant="outline" className="capitalize">{boat.status}</Badge>
-                          {boat.documents?.length > 0 && (
-                            <Badge variant="outline" className="text-aegean">{boat.documents.length} doc{boat.documents.length !== 1 ? "s" : ""}</Badge>
-                          )}
-                          <Button size="sm" variant="outline" className="gap-1 h-7 px-2" onClick={() => setEditingBoat(boat)}>
-                            <Pencil className="h-3 w-3" />
-                            Edit
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center py-10">
-                    <Ship className="h-10 w-10 text-muted-foreground mx-auto mb-3 opacity-50" />
-                    <p className="text-muted-foreground mb-4">No owner boats yet. Add your first boat to start receiving bookings.</p>
-                    <Button className="bg-gradient-accent text-accent-foreground gap-2" onClick={() => setShowAddBoat(true)}>
-                      <Plus className="h-4 w-4" />
-                      Add First Boat
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className="shadow-card">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle className="text-xl">Performance Report</CardTitle>
-                <BarChart3 className="h-5 w-5 text-aegean" />
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="rounded-2xl border border-border p-4">
-                    <p className="text-sm text-muted-foreground">Listed Boats</p>
-                    <p className="text-2xl font-bold text-foreground mt-1">{ownerStatsData.listedBoats}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border p-4">
-                    <p className="text-sm text-muted-foreground">Total Bookings</p>
-                    <p className="text-2xl font-bold text-foreground mt-1">{ownerStatsData.totalBookings}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border p-4">
-                    <p className="text-sm text-muted-foreground">Total Revenue</p>
-                    <p className="text-2xl font-bold text-foreground mt-1">€{ownerStatsData.totalRevenue.toLocaleString()}</p>
-                  </div>
-                  <div className="rounded-2xl border border-border p-4">
-                    <p className="text-sm text-muted-foreground">Avg Revenue / Booking</p>
-                    <p className="text-2xl font-bold text-foreground mt-1">€{averageRevenuePerBooking.toLocaleString()}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <PackageManagement />
 
             <Card className="shadow-card bg-muted/30">
               <CardHeader>
                 <CardTitle className="text-xl">Owner Growth Ideas</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2 text-sm text-muted-foreground">
-                <p>• Add at least 5 feature toggles per boat to increase booking confidence.</p>
-                <p>• Create 3 packages (3h, 6h, full-day) and assign them to every active boat.</p>
-                <p>• Upload real photos from your boat to improve conversion over placeholder images.</p>
+                <p>
+                  • Add at least 5 feature toggles per boat to increase booking
+                  confidence.
+                </p>
+                <p>
+                  • Create 3 packages (3h, 6h, full-day) and assign them to every
+                  active boat.
+                </p>
+                <p>
+                  • Upload real photos from your boat to improve conversion over
+                  placeholder images.
+                </p>
               </CardContent>
             </Card>
 
             <div className="text-center">
-              <Link to="/boats" className="text-aegean hover:text-turquoise transition-colors font-medium">
+              <Link
+                to="/boats"
+                className="text-aegean hover:text-turquoise transition-colors font-medium"
+              >
                 Browse customer-facing boats page →
               </Link>
             </div>
@@ -517,7 +604,9 @@ const OwnerProfile = () => {
       </main>
 
       {showAddBoat && <AddBoatModal onClose={handleCloseAdd} />}
-      {editingBoat && <AddBoatModal boat={editingBoat} onClose={handleCloseEdit} />}
+      {editingBoat && (
+        <AddBoatModal boat={editingBoat} onClose={handleCloseEdit} />
+      )}
 
       <Footer />
     </div>
