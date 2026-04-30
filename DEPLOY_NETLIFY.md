@@ -13,6 +13,15 @@ Quick steps to deploy this Vite React app to Netlify and connect a domain purcha
   - `VITE_API_BASE_URL` — full URL to your API (e.g. `https://api.yoursite.com`)
   - `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` if you use Supabase client calls in the browser
   - Any other `VITE_` prefixed vars you rely on
+    - Backend / function secrets for server-side Netlify Functions (set under Site → Settings → Build & deploy → Environment):
+      - `SUPABASE_URL` — Supabase project URL
+      - `SUPABASE_SERVICE_ROLE_KEY` — Supabase service_role key (keep secret)
+      - `STRIPE_SECRET_KEY` — Stripe secret key used by create-checkout
+      - `STRIPE_WEBHOOK_SECRET` — Stripe webhook signing secret (used by webhook function)
+      - `RESEND_API_KEY` — optional Resend API key for transactional emails
+      - `APP_BASE_URL` — production base URL (e.g., https://www.yoursite.com)
+      - `STRIPE_ALLOW_PLATFORM_FALLBACK` — optional flag (true/false)
+      - `STRIPE_PENDING_HOLD_MINUTES` — optional pending hold minutes (default 5)
 
 3) Single-page app routing
 - The repository already contains `netlify.toml` and `public/_redirects` to route all paths to `index.html` for the SPA.

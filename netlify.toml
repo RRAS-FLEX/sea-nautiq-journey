@@ -13,3 +13,11 @@
 [context.production.environment]
 # Recommended: set these in the Netlify UI (Site settings → Build & deploy → Environment)
 # VITE_API_BASE_URL = "https://api.yoursite.com"
+
+[dev]
+  # Run Vite for the frontend during local Netlify Dev
+  command = "npm run dev:frontend"
+  port = 8888
+  # Vite's internal server port that Netlify Dev should proxy to (uses 8081 when 8080 is taken)
+  targetPort = 8081
+  framework = "vite"
