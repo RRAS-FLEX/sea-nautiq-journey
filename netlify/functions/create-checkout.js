@@ -1,5 +1,5 @@
-const Stripe = require("stripe");
-const { createClient } = require("@supabase/supabase-js");
+import Stripe from "stripe";
+import { createClient } from "@supabase/supabase-js";
 
 const TIME_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 const isValidTime = (value) => TIME_REGEX.test(String(value ?? ""));
@@ -39,7 +39,7 @@ const corsHeaders = {
   "Content-Type": "application/json",
 };
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ ok: true }) };
   }
@@ -56,7 +56,7 @@ exports.handler = async (event) => {
       return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: "Stripe is not configured in function env" }) };
     }
 
-    const stripe = Stripe(stripeSecretKey, { apiVersion: "2025-02-24" });
+    const stripe = new Stripe(stripeSecretKey, { apiVersion: "2025-02-24" });
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
 
     const body = event.body ? JSON.parse(event.body) : {};

@@ -1,5 +1,5 @@
-const Stripe = require("stripe");
-const { createClient } = require("@supabase/supabase-js");
+import Stripe from "stripe";
+import { createClient } from "@supabase/supabase-js";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -8,7 +8,7 @@ const corsHeaders = {
 };
 
 // Netlify passes the raw body as event.body (string) and provides headers.
-exports.handler = async (event) => {
+export const handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ ok: true }) };
   }
@@ -26,7 +26,7 @@ exports.handler = async (event) => {
     return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: "Supabase admin is not configured in function env" }) };
   }
 
-  const stripe = Stripe(stripeSecret, { apiVersion: "2025-02-24" });
+  const stripe = new Stripe(stripeSecret, { apiVersion: "2025-02-24" });
   const supabaseAdmin = createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } });
 
   const signature = event.headers && (event.headers["stripe-signature"] || event.headers["Stripe-Signature"] || event.headers["stripe-signature".toLowerCase()]);
