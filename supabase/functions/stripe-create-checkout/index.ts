@@ -479,7 +479,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    const appBaseUrl = Deno.env.get("APP_BASE_URL") ?? "http://localhost:8080";
+    const appBaseUrl = Deno.env.get("APP_BASE_URL") ?? Deno.env.get("DEPLOY_PRIME_URL") ?? "https://your-deployed-netlify-site.netlify.app";
 
     const baseSessionPayload: Stripe.Checkout.SessionCreateParams = {
       mode: "payment",

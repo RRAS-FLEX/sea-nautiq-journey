@@ -76,7 +76,7 @@ STRIPE_WEBHOOK_SECRET=whsec_xxx
 
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
-APP_BASE_URL=http://localhost:8080
+APP_BASE_URL=https://your-site.netlify.app
 API_PORT=4242
 ```
 

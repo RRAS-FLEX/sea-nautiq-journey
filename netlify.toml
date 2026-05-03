@@ -16,8 +16,8 @@
 
 [dev]
   # Run Vite for the frontend during local Netlify Dev
-  command = "npm run dev:frontend"
+  command = "npm run dev:frontend -- --host 0.0.0.0 --port 8081 --strictPort"
   port = 8888
-  # Vite's internal server port that Netlify Dev should proxy to (uses 8081 when 8080 is taken)
+  # Vite's internal server port that Netlify Dev should proxy to
   targetPort = 8081
   framework = "vite"

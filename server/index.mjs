@@ -1508,7 +1508,7 @@ app.post("/api/stripe/create-checkout", async (req, res) => {
   }
 
   try {
-    const appBaseUrl = process.env.APP_BASE_URL ?? "http://localhost:8080";
+    const appBaseUrl = process.env.APP_BASE_URL ?? process.env.DEPLOY_PRIME_URL ?? "https://your-deployed-netlify-site.netlify.app";
     const baseSessionPayload = {
       mode: "payment",
       // Stripe Checkout uses `card` to support card entry plus Apple Pay / Google Pay

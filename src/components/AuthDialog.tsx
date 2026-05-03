@@ -42,7 +42,7 @@ const AuthDialog = ({ open, onOpenChange, onAuthenticated }: AuthDialogProps) =>
 
   const googleClientId = sanitizeGoogleClientId(import.meta.env.VITE_GOOGLE_CLIENT_ID);
   const hasUsableGoogleClientId = isGoogleClientIdUsable(googleClientId);
-  const currentOrigin = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+  const currentOrigin = typeof window !== "undefined" ? window.location.origin : "your deployed domain";
 
   const onAuthSuccess = (user: AuthUser) => {
     setErrorMessage("");

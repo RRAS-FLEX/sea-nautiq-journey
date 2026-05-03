@@ -39,6 +39,25 @@ const corsHeaders = {
   "Content-Type": "application/json",
 };
 
+const getRequestOrigin = (event) => {
+  const explicitBaseUrl = process.env.APP_BASE_URL?.trim();
+  if (explicitBaseUrl) return explicitBaseUrl.replace(/\/$/, "");
+
+  const headers = event.headers || {};
+  const requestOrigin = headers.origin || headers.Origin;
+  if (typeof requestOrigin === "string" && requestOrigin.trim()) {
+    return requestOrigin.trim().replace(/\/$/, "");
+  }
+
+  const forwardedProto = headers["x-forwarded-proto"] || headers["X-Forwarded-Proto"] || "https";
+  const forwardedHost = headers["x-forwarded-host"] || headers["X-Forwarded-Host"] || headers.host || headers.Host;
+  if (typeof forwardedHost === "string" && forwardedHost.trim()) {
+    return `${String(forwardedProto).split(",")[0].trim() || "https"}://${forwardedHost.trim().replace(/\/$/, "")}`;
+  }
+
+  return "https://your-deployed-netlify-site.netlify.app";
+};
+
 export const handler = async (event) => {
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 200, headers: corsHeaders, body: JSON.stringify({ ok: true }) };
@@ -261,7 +280,7 @@ export const handler = async (event) => {
       } catch {}
     }
 
-    const appBaseUrl = process.env.APP_BASE_URL ?? "http://localhost:8888";
+    const appBaseUrl = getRequestOrigin(event);
 
     const baseSessionPayload = {
       mode: "payment",
